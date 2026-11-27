@@ -15,7 +15,7 @@ async function setup(initial=mission(),url='/teams.html'){
  await page.route('**/api/**',async route=>{const req=route.request(),p=new URL(req.url()).pathname,method=req.method(),body=req.postDataJSON();calls.push({p,method,body,token:req.headers()['x-cc-token']});const send=(d,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(d)});
  if(p==='/api/session')return send({token:'team-token'});
  if(p==='/api/capabilities')return send({agents:[{id:'cursor',name:'Cursor',eligible:true,model:'unknown'},{id:'opencode',name:'OpenCode',eligible:false,model:'unknown',reason:'Check free route'}]});
- if(p==='/api/missions')return send({missions:current?[current]:[]});
+ if(p==='/api/missions'){if(method==='POST'){current=mission({title:body.title,objective:body.objective});return send(current);}return send({missions:current?[current]:[]});}
  if(p==='/api/missions/mis_team/team-workflow'){
    if(state.conflict)return send({error:{message:'Saved plan changed',code:'version_conflict'}},409);
    current={...current,plan:{team_workflow:body.plan},plan_version:current.plan_version+1,status:'awaiting_approval',can:{...current.can,approve:true,plan:false}};return send(current);
@@ -66,4 +66,20 @@ test('canvas pans, zooms, keeps unsaved edits on refresh, and fits at a narrow v
  const x=await setup(),{page}=x;await page.locator('[data-kind="management"]').click();await page.getByRole('button',{name:'Close settings'}).click();await page.getByRole('button',{name:'Zoom in',exact:true}).click();assert.equal(await page.locator('#zoom').innerText(),'110%');
  await page.getByRole('button',{name:'Refresh saved state',exact:true}).click();await page.waitForFunction(()=>!document.getElementById('refresh').disabled);assert.equal(await page.locator('.team-node').count(),1);assert.match(await page.locator('#saved-state').innerText(),/Unsaved/);
  await page.setViewportSize({width:900,height:768});await page.getByRole('button',{name:'Fit',exact:true}).click();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);assert.deepEqual(x.errors,[]);await x.context.close();
+});
+
+
+test('saving a canvas before mission creation preserves every configured block',async()=>{
+ const x=await setup(null),{page,calls}=x;
+ await page.locator('[data-kind="management"]').click();
+ await page.getByRole('button',{name:'Close settings'}).click();
+ await page.locator('#objective').fill('Preserve the configured team');
+ await page.getByRole('button',{name:'Save workflow',exact:true}).click();
+ await page.locator('#create-form input[name="title"]').fill('New team draft');
+ assert.equal(await page.locator('#create-form textarea[name="objective"]').inputValue(),'Preserve the configured team');
+ await page.getByRole('button',{name:'Create draft',exact:true}).click();
+ await page.waitForFunction(()=>document.getElementById('mission-status').textContent==='awaiting_approval');
+ assert.equal(await page.locator('.team-node').count(),1);
+ const save=calls.find(c=>c.p.endsWith('/team-workflow'));assert.equal(save.body.plan.blocks[0].kind,'management');
+ assert.equal(calls.filter(c=>c.method==='POST').length,1);assert.deepEqual(x.errors,[]);await x.context.close();
 });
