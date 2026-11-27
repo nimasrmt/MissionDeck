@@ -42,8 +42,9 @@ from app.plan import (
     load_and_validate_plan_file,
     planner_spec_text,
     topological_order,
+    validate_plan,
 )
-from app.security import cap_bytes, redact, resolve_under_workspace
+from app.security import SecurityError, cap_bytes, redact, resolve_under_workspace
 
 
 class AppError(Exception):
@@ -528,6 +529,8 @@ class MissionService:
             "start": status == "approved" and m["plan_status"] == "valid",
             "cancel": status not in TERMINAL_MISSION_STATUSES and status != "draft",
             "refresh": True,
+            "save_plan": status in ("draft", "awaiting_approval", "approved", "blocked", "failed")
+                         and not tasks and active == 0 and m["plan_status"] != "generating",
         }
         if status == "unknown":
             can["start"] = False
@@ -758,25 +761,62 @@ class MissionService:
 
     # --- approve / start / refresh / cancel / retry ---
 
+    def save_plan(self, mission_id: str, plan: dict[str, Any], plan_version: int) -> dict[str, Any]:
+        """Save a user-authored plan, with no native mutations or inference."""
+        with MissionStartLock():
+            mission = self.get_mission(mission_id)
+            if not mission["can"]["save_plan"]:
+                raise AppError("invalid_state", "Plans can only be edited before execution with no active workers")
+            if plan_version != mission["plan_version"]:
+                raise AppError("version_conflict", "The saved plan changed. Reload it before applying edits")
+            try:
+                validate_plan(plan, eligible_agents=self.eligible_agent_ids())
+            except PlanValidationError as exc:
+                raise AppError("invalid_plan", "The workflow has validation errors", {"errors": exc.errors}) from exc
+            for task in plan["tasks"]:
+                if not task.get("outputs") or not task.get("acceptance"):
+                    raise AppError("invalid_plan", "Each step needs an output path and acceptance criteria")
+                for command in task.get("validation", []):
+                    try:
+                        parse_validation_command(command)
+                    except SecurityError as exc:
+                        raise AppError(exc.code, exc.message, exc.details) from exc
+            now = utc_now()
+            changed = self.conn.execute(
+                """UPDATE missions SET plan_json = ?, plan_version = plan_version + 1,
+                   plan_status = 'valid', plan_errors_json = '[]', status = 'awaiting_approval',
+                   approved_at = NULL, updated_at = ? WHERE id = ? AND plan_version = ?""",
+                (dumps(plan), now, mission_id, plan_version),
+            )
+            if changed.rowcount != 1:
+                self.conn.rollback()
+                raise AppError("version_conflict", "The saved plan changed")
+            add_event(self.conn, mission_id, "plan_edited", "Workflow saved; approval required",
+                      {"plan_version": plan_version + 1})
+            add_audit(self.conn, "plan_edit", {"mission_id": mission_id, "plan_version": plan_version + 1})
+            self.conn.commit()
+            return self.get_mission(mission_id)
+
     def approve(self, mission_id: str, plan_version: int) -> dict[str, Any]:
+        with MissionStartLock():
+            return self._approve_locked(mission_id, plan_version)
+
+    def _approve_locked(self, mission_id: str, plan_version: int) -> dict[str, Any]:
         m = self.get_mission_row(mission_id)
         if m["plan_status"] != "valid":
             raise AppError("invalid_state", "Plan is not valid")
         if m["status"] != "awaiting_approval":
             raise AppError("invalid_state", "Mission not awaiting approval")
         if plan_version != m["plan_version"]:
-            # Client sends current version; we increment on approve
-            if plan_version != m["plan_version"]:
-                # Allow approving with current version number shown to client
-                pass
+            raise AppError("version_conflict", "The plan changed. Review the current version before approval")
         new_version = m["plan_version"] + 1
         now = utc_now()
-        self.conn.execute(
+        changed = self.conn.execute(
             """UPDATE missions SET status = 'approved', plan_version = ?, approved_at = ?, updated_at = ?
-               WHERE id = ? AND status = 'awaiting_approval' AND plan_status = 'valid'""",
-            (new_version, now, now, mission_id),
+               WHERE id = ? AND status = 'awaiting_approval' AND plan_status = 'valid' AND plan_version = ?""",
+            (new_version, now, now, mission_id, plan_version),
         )
-        if self.conn.total_changes == 0:
+        if changed.rowcount != 1:
             raise AppError("conflict", "Approve race lost")
         write_checkpoint(mission_id, "approved", {"plan_version": new_version})
         add_event(self.conn, mission_id, "approved", f"Plan version {new_version} approved")

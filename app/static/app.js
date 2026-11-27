@@ -105,7 +105,7 @@
     const connected = data.orca?.available === true;
     const host = $("connection-status");
     host.replaceChildren(el("span", "", `status-dot status-dot--${connected ? "ok" : "danger"}`), el("span", connected ? `Orca ${data.orca.version || "version unknown"}` : "Orca unavailable", "status-text"));
-    put("workspace-notice", `Workspace: ${data.workspace}. Workers write here. Scope fields constrain tasks within this workspace; they do not select another project.${connected ? "" : " Orca is unavailable; planning and execution require a running local Orca installation."}`);
+    put("workspace-notice", `Workspace · ${data.workspace}${connected ? "" : " · Orca unavailable. Open Orca to plan or execute work."}`);
   }
   async function capabilities() {
     state.capabilities = await request("/api/capabilities");
@@ -117,12 +117,12 @@
     $("setting-auto-refresh").value = data.auto_refresh_seconds;
     $("setting-redaction").checked = data.redaction_enabled;
     put("auto-refresh-badge", data.auto_refresh_seconds ? `Saved-state refresh ${data.auto_refresh_seconds}s` : "Auto-refresh off");
-    $("auto-refresh-badge").hidden = false;
+    $("auto-refresh-badge").hidden = !data.auto_refresh_seconds;
     // This badge is mission-local; do not invent a global active-worker count.
     put("worker-cap-badge", state.view === "mission" && state.mission ? `Mission workers ${state.mission.active_dispatches} · app cap ${data.worker_cap}` : `App worker cap ${data.worker_cap}`);
     clearInterval(state.timer);
     if (data.auto_refresh_seconds > 0) state.timer = setInterval(() => {
-      if (!state.busy && !document.hidden && ["missions", "mission", "artifacts"].includes(state.view)) work(refreshView);
+      if (!state.busy && !window.MissionPlanner.isOpen() && !document.hidden && ["missions", "mission", "artifacts"].includes(state.view)) work(refreshView);
     }, data.auto_refresh_seconds * 1000);
   }
   async function showMissions() {
@@ -140,6 +140,9 @@
   }
   async function composer() {
     route("composer"); $("composer-form").reset(); message("composer-error", "");
+    $("field-quality").value = "Declared output files exist and the validation checks pass.";
+    $("field-scope").value = "Only files declared in the approved workflow, within this workspace.";
+    $("field-constraints").value = "Use verified included routes and follow the declared file scopes.";
     const select = $("field-coordinator"); select.replaceChildren(el("option", "Loading agents…"));
     const data = await capabilities();
     const prompt = el("option", "Choose an eligible coordinator"); prompt.value = "";
@@ -148,6 +151,8 @@
       const option = el("option", `${agent.name}${agent.eligible ? "" : ` — ${agent.reason}`}`);
       option.value = agent.id; option.disabled = !agent.eligible; select.append(option);
     }
+    const eligible = data.agents.filter(agent => agent.eligible);
+    if (eligible.length === 1) select.value = eligible[0].id;
     put("coordinator-hint", data.agents.some(a => a.eligible) ? "Creating saves a draft. Plan mission launches the planner separately." : "No eligible agents. Check Orca and the Agents view for billing and quota evidence.");
     $("field-title").focus();
   }
@@ -157,18 +162,35 @@
     route("mission"); renderMission();
   }
   function actionButtons() {
-    const mission = state.mission, can = mission.can || {};
-    for (const [id, key] of [["btn-plan", "plan"], ["btn-approve", "approve"], ["btn-start", "start"], ["btn-cancel", "cancel"], ["btn-mission-refresh", "refresh"]]) $(id).disabled = state.busy || !can[key];
+    const mission = state.mission, can = mission.can || {}, editing = window.MissionPlanner.isOpen();
+    for (const [id, key] of [["btn-plan", "plan"], ["btn-approve", "approve"], ["btn-start", "start"], ["btn-cancel", "cancel"], ["btn-mission-refresh", "refresh"]]) {
+      $(id).disabled = state.busy || editing || !can[key];
+      $(id).hidden = editing || !can[key] || (key === "refresh" && !mission.run_id && !mission.planner?.dispatch_id && !mission.tasks?.length && mission.status !== "unknown");
+    }
+    $("btn-edit-plan").hidden = editing || !can.save_plan;
+    $("btn-edit-plan").disabled = state.busy || !can.save_plan;
+    put("btn-edit-plan", mission.plan ? "Edit workflow" : "Build workflow");
     const repair = ["invalid", "failed"].includes(mission.plan_status) && mission.repair_count < 1;
-    $("btn-repair").hidden = !repair; $("btn-repair").disabled = state.busy || !repair;
+    $("btn-repair").hidden = editing || !repair; $("btn-repair").disabled = state.busy || !repair;
     put("btn-approve", `Approve plan v${mission.plan_version}`);
+    $("btn-approve").classList.toggle("btn--primary", Boolean(can.approve));
+    $("btn-start").classList.toggle("btn--primary", Boolean(can.start));
   }
   function renderMission() {
     const m = state.mission;
     put("mission-heading", m.title);
-    put("mission-meta", `${m.status} · ${m.coordinator} · ${m.id} · run ${m.run_id || "not created"}`);
+    put("mission-meta", `${m.status.replaceAll("_", " ")} · ${m.coordinator}`);
+    put("mission-identifiers", `Mission ${m.id}\nRun ${m.run_id || "not created"}`);
     // freshness from the current API is a serialization time, not an Orca check.
-    put("mission-snapshot", `Saved state updated ${time(m.updated_at)}. Reading this page does not check Orca liveness. Workspace: ${m.workspace}`);
+    put("mission-snapshot", `Saved state updated ${time(m.updated_at)} · Workspace: ${m.workspace}`);
+    const stage = m.status === "succeeded" ? "delivery" : m.tasks?.length || ["approved", "running", "review"].includes(m.status) ? "execution" : "plan";
+    ["plan", "execution", "delivery"].forEach((name, index) => {
+      const item = $(`stage-${name}`), current = name === stage;
+      item.classList.toggle("is-current", current); item.classList.toggle("is-complete", index < ["plan", "execution", "delivery"].indexOf(stage));
+      if (current) item.setAttribute("aria-current", "step"); else item.removeAttribute("aria-current");
+    });
+    const next = m.status === "draft" ? "Describe the steps yourself, or ask AI to propose a plan." : m.plan_status === "generating" ? "The planner is working. Reconcile to check its result." : m.can?.approve ? "Review the connections and outputs, then approve this version." : m.can?.start ? "Plan approved. Start execution when you are ready." : m.status === "succeeded" ? "Work completed. Inspect the files and validation in Delivery." : m.status === "running" ? "Follow the steps below. Reconcile & continue checks Orca and advances approved work." : "Inspect the current state and evidence before continuing.";
+    put("mission-next-action", next);
     put("worker-cap-badge", `Mission workers ${m.active_dispatches} · app cap ${state.settings.worker_cap}`);
     put("exec-cap-value", `${m.active_dispatches} in this mission · app cap ${state.settings.worker_cap}`);
     $("plan-errors").hidden = !m.plan_errors?.length;
@@ -198,6 +220,7 @@
     return card;
   }
   function renderPlan() {
+    if (window.MissionPlanner.isOpen()) return;
     const m = state.mission, plan = m.plan;
     $("plan-content").hidden = !plan; $("plan-empty").hidden = Boolean(plan);
     if (!plan) {
@@ -207,12 +230,15 @@
     put("plan-summary", plan.mission_summary); put("plan-architecture", plan.architecture); put("plan-rationale", plan.selection_rationale);
     list($("plan-departments"), (plan.departments || []).map(dept => `${dept.id} · ${dept.name}`));
     $("plan-tasks").replaceChildren(...allTasks().map(t => taskCard(t)));
-    window.MissionGraph.render($("plan-dag"), plan.tasks || [], id => {
+    window.MissionGraph.render($("plan-dag"), allTasks().map(t => ({...t, id:t.plan_task_id || t.id})), id => {
       const task = allTasks().find(t => t.plan_task_id === id || t.id === id); if (task) openDetail(task);
-    });
+    }, {layoutKey: m.id,departments:plan.departments});
   }
   function renderExecution() {
     const m = state.mission, host = $("worker-cards"); host.replaceChildren();
+    window.MissionGraph.render($("execution-dag"), allTasks().map(t => ({...t,id:t.plan_task_id || t.id})), id => {
+      const task = allTasks().find(t => t.plan_task_id === id || t.id === id); if (task) openDetail(task);
+    }, {layoutKey: m.id,departments:m.plan?.departments});
     $("execution-state").hidden = Boolean(m.tasks?.length);
     if (m.planner?.dispatch_id && !m.tasks?.length) empty("execution-state", `Planner ${m.planner.dispatch_id} · ${m.plan_status}. Native state ${m.planner.state || "unknown"}. Reconcile explicitly to check Orca.`);
     else if (!m.tasks?.length) empty("execution-state", "Execution has not started. Review and approve a valid plan first.");
@@ -279,6 +305,10 @@
     if (restore && state.focusReturn?.isConnected) state.focusReturn.focus();
   }
   function switchTab(name) {
+    if (name !== "plan" && window.MissionPlanner.isOpen()) {
+      if (!window.MissionPlanner.close(true)) return;
+      renderPlan();
+    }
     state.tab = name;
     document.querySelectorAll("[data-tab]").forEach(node => {
       const active = node.dataset.tab === name;
@@ -327,10 +357,23 @@
     state.mission = await request(path(state.mission.id, suffix), "POST", body);
     state.stale = false; updateFreshness(); renderMission();
   }
-  document.querySelectorAll("[data-nav]").forEach(node => node.addEventListener("click", () => work(async () => {
-    route(node.dataset.nav); await refreshView(); setSettings(state.settings);
-  })));
-  $("btn-new-mission").addEventListener("click", () => work(composer));
+  document.querySelectorAll("[data-nav]").forEach(node => node.addEventListener("click", () => {
+    if (state.busy || !window.MissionPlanner.close(true)) return;
+    work(async () => { route(node.dataset.nav); await refreshView(); setSettings(state.settings); });
+  }));
+  $("btn-new-mission").addEventListener("click", () => {
+    if (state.busy || !window.MissionPlanner.close(true)) return;
+    work(composer);
+  });
+  $("btn-edit-plan").addEventListener("click", () => work(async () => {
+    const data = await capabilities(); switchTab("plan"); closeDetail(false);
+    window.MissionPlanner.open(state.mission, data.agents, {
+      onState: actionButtons, onBusy: setBusy, onCloseDetail: () => closeDetail(false),
+      onSave: (plan, version) => request(path(state.mission.id, "/plan"), "PUT", {plan, plan_version:version}),
+      onSaved: mission => {state.mission=mission;renderMission();}, onDiscard: renderMission
+    });
+  }, "mission-action-error"));
+  window.addEventListener("missiondeck-editor-idle", () => setBusy(false));
   $("btn-composer-cancel").addEventListener("click", () => work(async () => { route("missions"); await showMissions(); }));
   $("composer-form").addEventListener("submit", event => {
     event.preventDefault();

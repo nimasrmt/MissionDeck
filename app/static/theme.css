@@ -1,0 +1,52 @@
+/* Shared MissionDeck palette. Paint the document AND body to avoid a mixed canvas. */
+:root {
+  color-scheme: dark;
+  --bg-deep: #111821;
+  --bg-panel: #19232f;
+  --bg-elevated: #212e3d;
+  --bg-hover: #2a3a4c;
+  --border: #384a5e;
+  --border-strong: #526a83;
+  --text: #eef3f9;
+  --text-muted: #bac7d7;
+  --text-dim: #adbdcf;
+  --accent: #afcdff;
+  --accent-soft: #243650;
+  --accent-border: #6485ae;
+  --button-primary: #315e9c;
+  --button-primary-hover: #3b6db2;
+  --button-text: #ffffff;
+  --ok: #a1ddbb;
+  --ok-soft: #203b31;
+  --warn: #f0d497;
+  --warn-soft: #3b3324;
+  --danger: #f3b3b8;
+  --danger-soft: #412b34;
+  --info: #b0d3ff;
+  --unknown: #bac7d7;
+  --rail-width: 208px;
+  --detail-width: 360px;
+  --radius: 8px;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --font: "Vazirmatn", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", "Consolas", monospace;
+  --focus: 0 0 0 2px var(--bg-deep), 0 0 0 4px var(--accent);
+  --shadow-drawer: -8px 0 24px rgba(0, 0, 0, 0.25);
+  --transition: 140ms ease;
+}
+html, body {
+  min-height: 100%;
+  background-color: var(--bg-deep);
+  color: var(--text);
+}
+body { font-family: var(--font); font-size: 1rem; line-height: 1.6; }
+::selection { background: #425f85; color: #ffffff; }
+@media (forced-colors: active) {
+  html, body { background: Canvas; color: CanvasText; }
+  :focus-visible { outline: 2px solid Highlight; }
+}
