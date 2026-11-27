@@ -192,4 +192,20 @@ class ManagerServiceTests(unittest.TestCase):
             send(self.service,self.parent['id'],message='Compare two free models',advisors=[{'agent':'opencode','model':'opencode/free-one'},{'agent':'opencode','model':'opencode/free-two'}],block_id='MGR',request_id='multi_model_1234')
         self.assertEqual([c.kwargs['model'] for c in self.adapter.worker_start.call_args_list],['opencode/free-one','opencode/free-two'])
 
+    def test_independent_inspector_cannot_pass_after_rewriting_a_recorded_producer_file(self):
+        saved=self.service.save_plan(self.parent['id'],{'team_workflow':flow()},0)
+        self.service.approve(saved['id'],1)
+        started=self.service.start(saved['id'])
+        producer=next(t for t in started['tasks'] if t['plan_task_id']=='ENG_w1')
+        inspector=next(t for t in started['tasks'] if t['role']=='team_inspection')
+        report=self.root/'out/report.md';report.parent.mkdir(parents=True);report.write_text('Original accepted output')
+        self.conn.execute("INSERT INTO artifacts(id,mission_id,task_id,rel_path,size,sha256,kind,verified,created_at) VALUES(?,?,?,?,?,?,?,?,?)",('art_producer',saved['id'],producer['id'],'out/report.md',report.stat().st_size,hashlib.sha256(report.read_bytes()).hexdigest(),'md',1,'2026-11-27T00:00:00Z'))
+        target=self.root/inspector['outputs'][0];target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_text(json.dumps({'verdict':'PASS','dispatch_id':'ctx_inspector','findings':[],'checks':[{'criterion':'Deliverable correct','evidence':'Read original output','passed':True}]}))
+        report.write_text('Inspector rewrote the producer output')
+        self.service._settle_task(saved['id'],inspector['id'],'ctx_inspector','done')
+        result=next(t for t in self.service.get_mission(saved['id'])['tasks'] if t['id']==inspector['id'])
+        self.assertEqual(result['status'],'failed')
+        self.assertTrue(any(e['type']=='inspection_input_changed' for e in result['evidence']))
+
 if __name__=='__main__':unittest.main()

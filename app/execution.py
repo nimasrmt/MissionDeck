@@ -1253,6 +1253,22 @@ You may write only these paths:
             if result.get("status") != "ok":
                 all_ok = False
 
+        # Independent inspection cannot accept producer files that changed after their recorded handoff.
+        if t["role"] == "team_inspection":
+            plan = loads(self.get_mission_row(mission_id)["plan_json"], {})
+            contract = next((p for p in plan.get("tasks", []) if p["id"] == t["plan_task_id"]), {})
+            for rel in contract.get("inputs", []):
+                recorded = self.conn.execute("SELECT sha256 FROM artifacts WHERE mission_id = ? AND rel_path = ? AND verified = 1 ORDER BY rowid DESC LIMIT 1", (mission_id, rel)).fetchone()
+                if not recorded:
+                    continue
+                try:
+                    unchanged = sha256_file(resolve_under_workspace(rel, workspace=WORKSPACE, must_exist=True)) == recorded["sha256"]
+                except (SecurityError, OSError):
+                    unchanged = False
+                if not unchanged:
+                    all_ok = False
+                    evidence.append({"type": "inspection_input_changed", "path": rel, "ts": utc_now()})
+
         # Team gates require a real scoped verdict; native done alone never opens the next block.
         if t["role"] in ("team_check", "team_inspection"):
             try:
