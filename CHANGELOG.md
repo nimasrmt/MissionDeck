@@ -2,6 +2,9 @@
 
 ## Unreleased - mission UI restoration
 
+- Parse native account usage from `result.rateLimits`; recognize reported Cursor free/ok evidence while retaining unknown quota blocks for Codex and error blocks for Grok.
+- Read the native runtime version and readiness, project status metadata, reject `ok:false` CLI envelopes and extract business identifiers from `result` instead of the request correlation ID.
+
 - Add a read-only, allowlisted CLI diagnostic for investigating real account/usage payload shapes without exporting credentials or account identities.
 
 - Discover an existing Orca CLI in its standard per-user Windows install when it is absent from PATH; explicit configuration and PATH retain priority.

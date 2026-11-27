@@ -36,6 +36,7 @@ from app.db import (
     write_checkpoint,
 )
 from app.orca_adapter import OrcaAdapter, OrcaError
+from app.native_payloads import project_status
 from app.plan import (
     PlanValidationError,
     load_and_validate_plan_file,
@@ -185,24 +186,31 @@ def sha256_file(path: Path) -> str:
 
 
 def extract_handle(payload: dict[str, Any]) -> str | None:
+    if payload.get("ok") is False:
+        return None
+    if "result" in payload:
+        result = payload["result"]
+        return extract_handle(result) if isinstance(result, dict) else None
+    terminal = payload.get("terminal")
+    if isinstance(terminal, dict):
+        return extract_handle(terminal)
     for key in ("handle", "terminal", "id", "terminalHandle"):
         val = payload.get(key)
         if isinstance(val, str) and val:
             return val
-    result = payload.get("result")
-    if isinstance(result, dict):
-        return extract_handle(result)
     return None
 
 
 def extract_id(payload: dict[str, Any], *keys: str) -> str | None:
+    if payload.get("ok") is False:
+        return None
+    if "result" in payload:
+        result = payload["result"]
+        return extract_id(result, *keys) if isinstance(result, dict) else None
     for key in keys:
         val = payload.get(key)
         if isinstance(val, str) and val:
             return val
-    result = payload.get("result")
-    if isinstance(result, dict):
-        return extract_id(result, *keys)
     return None
 
 
@@ -268,7 +276,7 @@ class MissionService:
             "workspace": str(WORKSPACE),
             "worker_cap": worker_cap,
             "checked_at": utc_now(),
-            "orca": status,
+            "orca": project_status(status),
             "agents": agents_list,
             "note": (
                 "App-enforced worker_cap applies only to dispatches started by this app; "
@@ -277,6 +285,10 @@ class MissionService:
         }
 
     def _normalize_agents(self, agents_raw: dict, accounts: dict) -> list[dict[str, Any]]:
+        if agents_raw.get("ok") is False:
+            agents_raw = {}
+        if accounts.get("ok") is False:
+            accounts = {}
         installed = agents_raw.get("agents") or agents_raw.get("result") or agents_raw.get("installed") or []
         if isinstance(installed, dict):
             installed = installed.get("agents") or list(installed.values())
@@ -288,6 +300,24 @@ class MissionService:
             account_rows = account_rows.get("accounts") or []
         if not isinstance(account_rows, list):
             account_rows = []
+
+        # Native 1.4.x account-list groups provider usage under result.rateLimits;
+        # provider-specific .accounts lists may be empty despite valid usage data.
+        account_data = accounts.get("result", accounts)
+        rate_limits = account_data.get("rateLimits") if isinstance(account_data, dict) else None
+        if isinstance(rate_limits, dict):
+            native_rows = []
+            for aid, row in rate_limits.items():
+                if not isinstance(aid, str) or not isinstance(row, dict):
+                    continue
+                if row.get("provider") not in (None, aid):
+                    native_rows.append({"agent": aid, "status": "unavailable", "_source": "result.rateLimits"})
+                    continue
+                native_rows.append({**row, "agent": aid, "_source": "result.rateLimits",
+                                    **({"status": "error"} if row.get("error") is not None else {})})
+            # Native status is authoritative; legacy rows must not override a
+            # reported native error or unavailable status.
+            account_rows = native_rows + account_rows
 
         by_id: dict[str, dict] = {}
         for item in installed:
@@ -318,6 +348,11 @@ class MissionService:
         eligible = False
 
         acct = next((a for a in accounts if isinstance(a, dict) and (a.get("agent") == agent_id or a.get("id") == agent_id)), None)
+        if acct is not None:
+            if acct.get("_source") == "result.rateLimits":
+                evidence.append("source=result.rateLimits")
+            reported_status = acct.get("status")
+            evidence.append(f"status={reported_status}" if reported_status in ("ok", "error", "unavailable") else "status=unknown")
 
         if agent_id == "cursor":
             plan = (acct or {}).get("planType") or info.get("planType")
@@ -332,7 +367,7 @@ class MissionService:
         elif agent_id == "grok":
             status_ok = (acct or info).get("status") == "ok"
             oauth = bool((acct or info).get("oauth") or (acct or info).get("auth") == "oauth")
-            weekly = (acct or info).get("weeklyWindow") or (acct or info).get("weekly_window")
+            weekly = (acct or info).get("weeklyWindow") or (acct or info).get("weekly_window") or (acct or info).get("weekly")
             billing = "included_allowance"
             if installed and status_ok and oauth and isinstance(weekly, dict) and weekly:
                 eligible = True
@@ -390,7 +425,10 @@ class MissionService:
 
     def require_eligible(self, agent: str, model: str | None = None) -> None:
         """Check current evidence before any worker dispatch, never a UI cache."""
-        row = next((a for a in self.capabilities()["agents"] if a["id"] == agent), None)
+        capabilities = self.capabilities()
+        if not capabilities["orca"]["available"]:
+            raise AppError("orca_unavailable", "Orca did not report a ready, connected runtime")
+        row = next((a for a in capabilities["agents"] if a["id"] == agent), None)
         if not row or not row["eligible"]:
             raise AppError("agent_ineligible", f"Agent {agent} is not currently eligible",
                            {"reason": row["reason"] if row else "agent not reported"})

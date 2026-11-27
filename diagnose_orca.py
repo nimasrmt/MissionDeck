@@ -121,7 +121,7 @@ def collect(adapter: OrcaAdapter) -> dict[str, Any]:
             report[label] = project(operation())
         except OrcaError as exc:
             # Error strings/details can contain paths, command output or secrets.
-            known_codes = {"timeout", "not_found", "os_error", "cli_error", "invalid_json"}
+            known_codes = {"timeout", "not_found", "os_error", "cli_error", "invalid_json", "native_error"}
             report[label] = {"error": exc.code if exc.code in known_codes else "cli_error"}
     return report
 

@@ -68,6 +68,8 @@ The app binds loopback only. It stores its own metadata in `.orca-runs\command-c
 
 The capability matrix is derived from Orca's own `agent installed` and `account list` output at request time. It does not invent quota.
 
+Native 1.4.x account usage is read from `result.rateLimits.<provider>` even when the provider's `accounts` array is empty. Native error states override legacy account rows. The dashboard version comes from `result.runtime.appVersion`; a reported disconnected or unready runtime blocks dispatch. Native `result` identifiers take precedence over the envelope's request correlation `id`.
+
 - Cursor: eligible only on the included free plan with status ok.
 - Grok: eligible only with status ok and an included weekly allowance.
 - OpenCode: blocked until a pinned free model route can be verified. Installation alone is insufficient evidence.

@@ -31,6 +31,7 @@ from app.db import (
 )
 from app.execution import AppError, MissionService
 from app.orca_adapter import OrcaAdapter, OrcaError
+from app.native_payloads import project_status
 from app.session_monitor import project_sessions
 from app.security import (
     SecurityError,
@@ -180,12 +181,7 @@ def api_health() -> dict[str, Any]:
     adapter = get_adapter()
     orca: dict[str, Any]
     try:
-        status = adapter.status()
-        orca = {
-            "available": True,
-            "version": status.get("version") or (status.get("result") or {}).get("version"),
-            "runtime": status,
-        }
+        orca = project_status(adapter.status())
     except OrcaError as exc:
         orca = {"available": False, "version": None, "runtime": {"error": exc.message}}
     return {
