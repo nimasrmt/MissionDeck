@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
   <title>MissionDeck</title>
+  <link rel="stylesheet" href="/static/theme.css">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -15,11 +17,10 @@
         <span class="rail-mark" aria-hidden="true"></span>
         <div class="rail-brand-text">
           <span class="rail-title">MissionDeck</span>
-          <span class="rail-sub">Command Center</span>
+          <span class="rail-sub">Local workspace</span>
         </div>
       </div>
       <nav class="rail-nav" aria-label="Views">
-        <a class="nav-item" href="/">Agent activity ↗</a>
         <button type="button" class="nav-item is-active" data-nav="missions" aria-current="page">
           <span class="nav-label">Missions</span>
         </button>
@@ -32,6 +33,7 @@
         <button type="button" class="nav-item" data-nav="settings">
           <span class="nav-label">Settings</span>
         </button>
+        <a class="nav-item nav-item--secondary" href="/monitor.html">Agent activity</a>
       </nav>
       <div class="rail-status" id="connection-status" role="status" aria-live="polite">
         <span class="status-dot status-dot--unknown" aria-hidden="true"></span>
@@ -43,7 +45,7 @@
       <header class="topbar">
         <div class="topbar-left">
           <h1 class="page-title" id="page-title">Missions</h1>
-          <p class="page-sub" id="page-sub">Live mission index from the local API</p>
+          <p class="page-sub" id="page-sub">Plan work. Follow execution. Inspect the result.</p>
         </div>
         <div class="topbar-right">
           <span id="freshness-badge" class="badge badge--muted" hidden>Stale</span>
@@ -56,7 +58,7 @@
       <div class="workspace-body detail-collapsed">
         <main id="main" class="main" tabindex="-1">
           <p id="global-message" class="alert alert--error" role="alert" hidden></p>
-          <p id="workspace-notice" class="notice" dir="auto">Loading workspace…</p>
+          <p id="workspace-notice" class="workspace-notice" dir="auto">Loading workspace…</p>
           <!-- Missions list -->
           <section id="view-missions" class="view" data-view-panel="missions" aria-labelledby="page-title">
             <div class="view-toolbar">
@@ -78,6 +80,7 @@
                 <label for="field-objective">Objective</label>
                 <textarea id="field-objective" name="objective" rows="4" required></textarea>
               </div>
+              <details class="composer-advanced"><summary>Quality, files and constraints</summary>
               <div class="field">
                 <label for="field-quality">Quality requirements</label>
                 <textarea id="field-quality" name="quality_requirements" rows="3" required></textarea>
@@ -85,11 +88,13 @@
               <div class="field">
                 <label for="field-scope">Scope</label>
                 <textarea id="field-scope" name="scope" rows="3" required></textarea>
+                <p class="field-hint">Paths are relative to the workspace shown above.</p>
               </div>
               <div class="field">
                 <label for="field-constraints">Constraints</label>
                 <textarea id="field-constraints" name="constraints" rows="3" required></textarea>
               </div>
+              </details>
               <div class="field">
                 <label for="field-coordinator">Coordinator</label>
                 <select id="field-coordinator" name="coordinator" required>
@@ -107,13 +112,17 @@
 
           <!-- Mission detail: plan / execution / delivery tabs -->
           <section id="view-mission" class="view" data-view-panel="mission" hidden aria-labelledby="mission-heading">
+            <ol class="mission-progress" aria-label="Mission stages">
+              <li id="stage-plan">Plan</li><li id="stage-execution">Execute</li><li id="stage-delivery">Deliver</li>
+            </ol>
             <div class="mission-header">
               <div class="mission-header-text">
                 <h2 id="mission-heading" class="mission-title"></h2>
                 <p id="mission-meta" class="mission-meta"></p>
               </div>
               <div class="mission-actions" id="mission-actions">
-                <button type="button" class="btn btn--primary" id="btn-plan" disabled>Plan mission</button>
+                <button type="button" class="btn btn--primary" id="btn-plan" disabled>Plan with AI</button>
+                <button type="button" class="btn btn--secondary" id="btn-edit-plan" disabled>Build workflow</button>
                 <button type="button" class="btn btn--secondary" id="btn-repair" hidden disabled>Repair plan (once)</button>
                 <button type="button" class="btn btn--secondary" id="btn-approve" disabled>Approve plan</button>
                 <button type="button" class="btn btn--secondary" id="btn-start" disabled>Start execution</button>
@@ -122,8 +131,7 @@
               </div>
             </div>
             <p id="mission-action-error" class="form-error" role="alert" hidden></p>
-            <p class="field-hint">Refresh reads saved state. Reconcile &amp; continue checks Orca, validates completed outputs and may launch the next approved tasks. Planning, starting and retrying launch real workers.</p>
-            <p id="mission-snapshot" class="field-hint" role="status"></p>
+            <p id="mission-next-action" class="next-action" role="status"></p>
             <div id="plan-errors" class="alert alert--error" hidden></div>
 
             <div class="tabs" role="tablist" aria-label="Mission views">
@@ -134,33 +142,32 @@
 
             <div id="panel-plan" class="tab-panel" role="tabpanel" aria-labelledby="tab-plan">
               <div id="plan-empty" class="state-panel" hidden></div>
+              <section id="plan-editor" class="plan-editor" hidden aria-label="Workflow editor">
+                <div class="editor-toolbar">
+                  <div><h3>Build your workflow</h3><p id="editor-count" class="field-hint"></p></div>
+                  <div class="editor-actions"><button type="button" class="btn btn--secondary" id="editor-add">Add step</button><button type="button" class="btn btn--ghost" id="editor-undo">Undo</button><button type="button" class="btn btn--ghost" id="editor-cancel">Discard edits</button><button type="button" class="btn btn--primary" id="editor-save">Save plan</button></div>
+                </div>
+                <label for="editor-goal" class="editor-goal-label">Plan objective</label><textarea id="editor-goal" rows="2"></textarea>
+                <p id="editor-error" class="form-error" role="alert" hidden></p>
+                <div id="editor-canvas" class="dag-host"></div>
+              </section>
               <div id="plan-content" class="plan-content" hidden>
-                <article class="plan-block">
-                  <h3>Mission summary</h3>
-                  <div id="plan-summary" class="prose" data-rtl-detect></div>
-                </article>
-                <article class="plan-block">
-                  <h3>Architecture</h3>
-                  <div id="plan-architecture" class="prose" data-rtl-detect></div>
-                </article>
-                <article class="plan-block">
-                  <h3>Selection rationale</h3>
-                  <div id="plan-rationale" class="prose" data-rtl-detect></div>
-                </article>
-                <article class="plan-block">
-                  <h3>Department lanes</h3>
-                  <ul id="plan-departments" class="chip-list"></ul>
-                </article>
-                <article class="plan-block">
-                  <h3>Dependency graph</h3>
-                  <div id="plan-dag" class="dag-host"></div>
-                </article>
-                <article class="plan-block">
-                  <h3>Tasks</h3>
+                <div class="workflow-heading"><h3>Workflow</h3><div id="plan-summary" class="prose" data-rtl-detect></div></div>
+                <div id="plan-dag" class="dag-host"></div>
+                <details class="planning-notes"><summary>Planning notes and step list</summary>
+                  <article class="plan-block"><h3>Architecture</h3><div id="plan-architecture" class="prose" data-rtl-detect></div></article>
+                  <article class="plan-block"><h3>Selection rationale</h3><div id="plan-rationale" class="prose" data-rtl-detect></div></article>
+                  <article class="plan-block"><h3>Departments</h3><ul id="plan-departments" class="chip-list"></ul></article>
                   <div id="plan-tasks" class="task-grid"></div>
-                </article>
+                </details>
               </div>
-              <article class="plan-block"><h3>Mission events</h3><ol id="mission-events" class="event-list"></ol></article>
+            <details class="mission-context">
+              <summary>Mission details and refresh behavior</summary>
+              <p id="mission-identifiers" class="mono"></p>
+              <p id="mission-snapshot" class="field-hint"></p>
+              <p class="field-hint">Refresh reads saved state. Reconcile &amp; continue checks Orca, validates completed outputs and may launch the next approved tasks. Planning, starting and retrying launch real workers.</p>
+            </details>
+              <details class="mission-history"><summary>Mission events</summary><ol id="mission-events" class="event-list"></ol></details>
             </div>
 
             <div id="panel-execution" class="tab-panel" role="tabpanel" aria-labelledby="tab-execution" hidden>
@@ -169,7 +176,8 @@
                 <span class="exec-cap-value" id="exec-cap-value">0 / 2</span>
               </div>
               <div id="execution-state" class="state-panel" hidden></div>
-              <div id="worker-cards" class="worker-grid" role="list"></div>
+              <div id="execution-dag" class="dag-host"></div>
+              <details class="execution-details"><summary>Worker details and native identifiers</summary><div id="worker-cards" class="worker-grid" role="list"></div></details>
             </div>
 
             <div id="panel-delivery" class="tab-panel" role="tabpanel" aria-labelledby="tab-delivery" hidden>
@@ -264,6 +272,7 @@
   <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
 
   <script src="/static/graph.js" defer></script>
+  <script src="/static/planner.js" defer></script>
   <script src="/static/app.js" defer></script>
 </body>
 </html>

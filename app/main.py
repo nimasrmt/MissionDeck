@@ -151,6 +151,11 @@ class ApproveBody(BaseModel):
     plan_version: int = 0
 
 
+class PlanEditBody(BaseModel):
+    plan_version: int = Field(ge=0)
+    plan: dict[str, Any]
+
+
 class CancelBody(BaseModel):
     confirm: bool = False
 
@@ -265,6 +270,15 @@ def api_approve(mission_id: str, body: ApproveBody) -> dict[str, Any]:
         return get_service().approve(mission_id, body.plan_version)
     except AppError as exc:
         return error_response(exc.code, exc.message, exc.details)  # type: ignore[return-value]
+
+
+@app.put("/api/missions/{mission_id}/plan")
+def api_save_plan(mission_id: str, body: PlanEditBody) -> Any:
+    try:
+        return get_service().save_plan(mission_id, body.plan, body.plan_version)
+    except (AppError, OrcaError) as exc:
+        return error_response(exc.code, exc.message, getattr(exc, "details", {}),
+                              status=409 if exc.code == "version_conflict" else 400)
 
 
 @app.post("/api/missions/{mission_id}/start")
@@ -422,8 +436,8 @@ def api_audit(limit: int = 100) -> dict[str, Any]:
 _static = WORKSPACE / "app" / "static"
 if _static.is_dir():
     @app.get("/", include_in_schema=False)
-    def monitor_home() -> Response:
-        return FileResponse(_static / "monitor.html", headers={"Cache-Control": "no-store"})
+    def dashboard_home() -> Response:
+        return FileResponse(_static / "index.html", headers={"Cache-Control": "no-store"})
 
     app.mount("/static", StaticFiles(directory=str(_static)), name="assets")
     app.mount("/", StaticFiles(directory=str(_static), html=True), name="static")

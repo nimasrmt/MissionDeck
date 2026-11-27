@@ -18,7 +18,7 @@ This repository is published as a **work in progress**, not a finished release.
 | Frontend JavaScript | Implemented: API-backed composer, plan DAG, execution, delivery, agents and settings |
 | Live end-to-end mission | **Not verified**; prior orchestration tests are not evidence of a full MissionDeck mission |
 
-The default page is a read-only session monitor using the native `orca agent list --json` command. It shows reported states, not proof of actual tool execution, and never starts workers. Its mission-control link opens `/index.html`, where the workflow is connected to the API. Browser tests use isolated API fixtures; they are not evidence of a live Orca mission. Real Windows/Orca acceptance remains pending.
+The default page opens Missions. Plans can be proposed by AI or built manually using connected task blocks. Before execution, steps, dependencies, agents, outputs and acceptance criteria can be edited and saved for approval. The read-only session monitor is at `/monitor.html`. Browser tests use isolated API fixtures; they are not evidence of a live Orca mission. Real Windows/Orca mission acceptance remains pending.
 
 ## Requirements
 
@@ -45,7 +45,7 @@ cd <path-to-this-repo>
 .\run.ps1
 ```
 
-Open `http://127.0.0.1:8765` for the read-only monitor, then follow **Open mission control**, or open `http://127.0.0.1:8765/index.html` directly. Starting the server creates no coordinator and does not reconcile persisted missions. The registered workspace is this repository root; scope fields constrain work within that root and do not select another project. The UI shows this path before creating a mission.
+Open `http://127.0.0.1:8765` for Missions; `/index.html` is an equivalent entry point. **Agent activity** opens the read-only session monitor at `/monitor.html`. Starting the server creates no coordinator and does not reconcile persisted missions. The registered workspace is this repository root; scope fields constrain work within that root and do not select another project. The UI shows this path before creating a mission.
 
 Stop:
 
@@ -58,8 +58,8 @@ The app binds loopback only. It stores its own metadata in `.orca-runs\command-c
 ## Workflow
 
 1. **Create a mission.** Title, objective, quality requirements, scope, constraints, and an eligible coordinator.
-2. **Plan mission.** Explicit action. A real native planner worker writes `.orca-runs\<mission>\plan.json`; the app validates it. Invalid plans are blocked with errors; one repair is allowed.
-3. **Approve plan.** Only a valid plan can be approved. The approval records the plan version.
+2. **Plan with AI / Build workflow.** AI planning explicitly launches a native planner. Manual planning uses blocks: add steps, set outputs and acceptance, then connect an output port to the next input. A dependency checklist provides the same editing without dragging. Loops and invalid paths are rejected. Save plan performs validation and stores metadata; it does not launch workers. Before execution, saving an edited plan clears approval and increments its version.
+3. **Approve plan.** Only the current valid version can be approved. Stale edits and stale approvals are rejected. Edits are locked once tasks are materialized or native workers are active.
 4. **Start execution.** Explicit action. The app creates one native Run, one native task per plan task in dependency order, and dispatches ready tasks with a maximum of two app-originated workers.
 5. **Refresh / Reconcile & continue.** Toolbar Refresh and optional auto-refresh perform GET requests for saved state. **Reconcile & continue** explicitly calls the POST refresh endpoint: it checks Orca, validates completed outputs and may launch ready tasks from the approved plan. A newly created database defaults to auto-refresh off; existing saved settings are retained.
 6. **Delivery.** Artifacts, validation exit codes, review verdict, quality gate, risks, and an escalation export.
@@ -96,7 +96,7 @@ Eligibility is checked again before planning and task dispatch, outside the UI c
 
 - **Development snapshot only. Do not enable live dispatch on a sensitive workspace.** Native identifier extraction, provider eligibility, and live worker recovery still require verification. Validation commands execute project Python code; only use trusted project workspaces.
 
-- Live CLI payload shapes, recovery after interrupted native mutations, cancellation settlement and provider routes still need real Windows/Orca validation. The default monitor remains the entry point until that acceptance is complete.
+- Live CLI payload shapes, recovery after interrupted native mutations, cancellation settlement and provider routes still need real Windows/Orca validation. The mission screen uses saved state and explicit actions; it does not imply live acceptance.
 - The two-worker cap is enforced for dispatches started by this app. Other Orca clients can start workers outside it.
 - The app does not implement automatic quality-based failover or automatic quota-aware routing. A failed provider is a supervised decision, not an automatic paid fallback.
 - Effective models for Cursor, Grok, and some OpenCode routes may be opaque. They are shown as `unknown`.
@@ -139,3 +139,9 @@ Security issues: report them privately rather than in a public issue.
 ## License
 
 No license has been declared yet. This repository is publicly visible, but an open-source license remains pending confirmation of source ownership and third-party licensing. Default copyright applies in the meantime.
+
+## Visual workflow editor
+
+The same graph shows planned and executing steps. Pending tasks identify the dependencies they are waiting for; node states come from saved task records. Inspect a step to see its files and evidence. Drag the header or use arrow keys to arrange cards; layout positions are browser-local and do not change execution dependencies. Zoom, Arrange and a text dependency list are available. Graph editing is limited to the existing eight-task DAG contract; loops, conditions and arbitrary shell blocks are not implemented.
+
+`PUT /api/missions/{id}/plan` accepts `{plan_version, plan}` with the existing session/CSRF checks. The server validates current agent eligibility, graph structure, output/acceptance fields and supported validation commands. Saving, approval and dispatch share the transition lock.
