@@ -226,6 +226,30 @@ def api_capabilities() -> dict[str, Any]:
     return data
 
 
+class FreeModelBody(BaseModel):
+    model: str
+
+
+@app.get("/api/free-models")
+def api_free_models() -> dict[str, Any]:
+    service = get_service()
+    from app.db import get_setting, loads
+    return {**loads(get_setting(service.conn, "free_model_catalog"), {}), "selected": get_setting(service.conn, "free_model_pin")}
+
+
+@app.post("/api/free-models/refresh")
+def api_probe_free_models() -> dict[str, Any]:
+    return get_service().refresh_free_models()
+
+
+@app.put("/api/free-models/selection")
+def api_select_free_model(body: FreeModelBody) -> Any:
+    try:
+        return get_service().select_free_model(body.model)
+    except AppError as exc:
+        return error_response(exc.code, exc.message, exc.details)
+
+
 @app.get("/api/missions")
 def api_list_missions() -> dict[str, Any]:
     return {"missions": get_service().list_missions()}
@@ -279,6 +303,24 @@ def api_save_plan(mission_id: str, body: PlanEditBody) -> Any:
     except (AppError, OrcaError) as exc:
         return error_response(exc.code, exc.message, getattr(exc, "details", {}),
                               status=409 if exc.code == "version_conflict" else 400)
+
+
+@app.post("/api/missions/{mission_id}/team-plan")
+def api_team_plan(mission_id: str) -> Any:
+    from app.execution import MissionStartLock
+    try:
+        with MissionStartLock():
+            return get_service()._start_plan_locked(mission_id, team=True)
+    except AppError as exc:
+        return error_response(exc.code, exc.message, exc.details)
+
+
+@app.put("/api/missions/{mission_id}/team-workflow")
+def api_save_team_workflow(mission_id: str, body: PlanEditBody) -> Any:
+    try:
+        return get_service().save_plan(mission_id, {"team_workflow": body.plan}, body.plan_version)
+    except AppError as exc:
+        return error_response(exc.code, exc.message, exc.details, 409 if exc.code == "version_conflict" else 400)
 
 
 @app.post("/api/missions/{mission_id}/start")

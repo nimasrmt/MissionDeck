@@ -145,3 +145,9 @@ No license has been declared yet. This repository is publicly visible, but an op
 The same graph shows planned and executing steps. Pending tasks identify the dependencies they are waiting for; node states come from saved task records. Inspect a step to see its files and evidence. Drag the header or use arrow keys to arrange cards; layout positions are browser-local and do not change execution dependencies. Zoom, Arrange and a text dependency list are available. Graph editing is limited to the existing eight-task DAG contract; loops, conditions and arbitrary shell blocks are not implemented.
 
 `PUT /api/missions/{id}/plan` accepts `{plan_version, plan}` with the existing session/CSRF checks. The server validates current agent eligibility, graph structure, output/acceptance fields and supported validation commands. Saving, approval and dispatch share the transition lock.
+
+## Specialist team canvas
+
+Open `/teams.html` (also the browser entry from `/`) for a connected team canvas. Add Management, Specialist and Inspection blocks, assign one supervisor and 1–8 employees to each, then save, approve and start. Each block becomes a real supervisor brief, bounded employee jobs and a scoped PASS/FAIL gate. All actors share the two-session app cap. Existing step missions remain at `/index.html`.
+
+Free model setup can inspect the installed OpenCode catalog and pin a verified zero-price tool-capable route, without inference or key entry. Availability and quota still need live validation. [Persian architecture, provider research and test steps](docs/TEAM_CANVAS_FA.md).
