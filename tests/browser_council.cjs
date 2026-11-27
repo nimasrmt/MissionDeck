@@ -58,6 +58,7 @@ test('management contains consulting AIs without staffing; image picker selects 
  await page.getByRole('group',{name:'Council AI 2',exact:true}).getByRole('button',{name:'Browse AI images and models'}).click();
  await page.locator('#catalog-filter').selectOption('models');
  await page.locator('.catalog-card').filter({hasText:'opencode/free-two'}).getByRole('button',{name:'Use this free model'}).click();
+ await page.waitForFunction(()=>!document.getElementById('agent-dialog').open);
  assert.match(await page.getByRole('group',{name:'Council AI 2',exact:true}).innerText(),/opencode\/free-two/);
  assert.equal(await page.locator('.satellite.council-member').count(),2);assert.equal(await page.locator('.satellite.supervisor').count(),0);
  assert.deepEqual(x.errors,[]);await x.context.close();
