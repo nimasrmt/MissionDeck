@@ -148,7 +148,7 @@ The same graph shows planned and executing steps. Pending tasks identify the dep
 
 ## Specialist team canvas
 
-Open `/teams.html` (also the browser entry from `/`) for a connected team canvas. Add Management, Specialist and Inspection blocks, assign one supervisor and 1–8 employees to each, then save, approve and start. Each block becomes a real supervisor brief, bounded employee jobs and a scoped PASS/FAIL gate. All actors share the two-session app cap. Existing step missions remain at `/index.html`.
+Open `/teams.html` (also the browser entry from `/`) for a connected team canvas. Add a peer-AI Management council, Specialist blocks with a supervisor and 1–8 employees, and an optional independent Inspection session. Save, approve and start separately. Specialist blocks execute a supervisor brief, employee jobs and a scoped PASS/FAIL gate; management uses peer advice and synthesis without staff. All actors share the two-session app cap. Existing step missions remain at `/index.html`.
 
 Free model setup can inspect the installed OpenCode catalog and pin a verified zero-price tool-capable route, without inference or key entry. Availability and quota still need live validation. [Persian architecture, provider research and test steps](docs/TEAM_CANVAS_FA.md).
 

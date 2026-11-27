@@ -605,6 +605,7 @@ class MissionService:
             "freshness": utc_now(),
             "active_dispatches": active,
             "global_active_dispatches": self.count_active_dispatches(),
+            "native_checked_at": self.conn.execute("SELECT MAX(last_seen_at) FROM dispatches WHERE mission_id = ?", (mission_id,)).fetchone()[0],
             "can": can,
             "repair_count": m["repair_count"],
             "approved_at": m["approved_at"],

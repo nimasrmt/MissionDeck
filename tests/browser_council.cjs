@@ -53,7 +53,7 @@ test('image catalogue lists unavailable agents honestly, filters locally and per
 test('management contains consulting AIs without staffing; image picker selects a distinct free model',async()=>{
  const x=await setup(),{page}=x;await page.locator('[data-kind="management"]').click();
  assert.equal(await page.getByLabel('Number of employees (1–8)').count(),0);assert.equal(await page.getByRole('group',{name:'AI supervisor'}).count(),0);
- await page.getByRole('group',{name:'Council AI 1',exact:true}).getByLabel('Agent',{exact:true}).selectOption('cursor');
+ assert.deepEqual(x.errors,[]);assert.equal(await page.getByRole('group',{name:'Council AI 1',exact:true}).count(),1,await page.locator('#inspector-body').innerText());await page.getByRole('group',{name:'Council AI 1',exact:true}).getByLabel('Agent',{exact:true}).selectOption('cursor');
  await page.getByRole('button',{name:'Add consulting AI',exact:true}).click();
  await page.getByRole('group',{name:'Council AI 2',exact:true}).getByRole('button',{name:'Browse AI images and models'}).click();
  await page.locator('#catalog-filter').selectOption('models');
@@ -84,7 +84,7 @@ test('manager chat persists a Persian message, returns a verified reply and appl
 test('input, final delivery, independent inspector and saved-file flow are directly inspectable',async()=>{
  const w=workflow(),tasks=[];for(const b of w.blocks){for(const tid of b.kind==='management'?[`${b.id}_advice1`,`${b.id}_advice2`,`${b.id}_check`]:b.kind==='specialist'?[`${b.id}_brief`,`${b.id}_w1`,`${b.id}_check`]:[`${b.id}_check`])tasks.push({id:tid,team_block:b.id});}
  const m=mission({status:'running',plan:{team_workflow:w,tasks},tasks:tasks.map(t=>({plan_task_id:t.id,status:t.team_block==='MGR'?'succeeded':t.id==='ENG_brief'?'running':'pending'})),active_dispatches:1,can:{save_plan:false,plan:false,cancel:true}});
- const x=await setup(m),{page,calls}=x;await page.waitForSelector('.flow-active');
+ const x=await setup(m),{page,calls}=x;await page.waitForSelector('.flow-active',{state:'attached'});assert.ok(await page.locator('.flow-active').evaluate(n=>n.getBoundingClientRect().width>0&&parseFloat(getComputedStyle(n).strokeWidth)>0));
  assert.equal(await page.locator('.endpoint-node').count(),2);assert.equal(await page.locator('.satellite.independent-inspector').count(),1);
  await page.locator('#fit').click();await page.locator('#flow-list').click();await page.getByRole('button',{name:/Management → Engineering/}).click();
  assert.match(await page.locator('#inspector-body').innerText(),/manager\.md/);assert.match(await page.locator('#inspector-body').innerText(),/SHA-256 abc123/);

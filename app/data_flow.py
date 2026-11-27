@@ -17,7 +17,7 @@ def project_flow(mission):
     def edge(src,dst,paths,text=None):
         source_state='available' if src=='__input' else state(src)
         target_state=mission.get('status') if dst=='__output' else state(dst)
-        active=dst!='__output' and target_state=='running' and source_state in ('available','succeeded')
+        active=mission.get('status') in ('running','review') and dst!='__output' and target_state=='running' and source_state in ('available','succeeded')
         files=[]
         for p in sorted(set(paths)):
             a=artifacts.get(p)
@@ -38,5 +38,5 @@ def project_flow(mission):
     for src in sources:edge(src,'__output',outputs.get(src,set()))
     inspector=(workflow.get('delivery') or {}).get('inspector')
     if inspector and inspector not in sources:edge(inspector,'__output',outputs.get(inspector,set()))
-    return {'edges':edges,'checked_at':mission.get('freshness'),
+    return {'edges':edges,'checked_at':mission.get('native_checked_at') or mission.get('updated_at') or mission.get('freshness'),
             'telemetry':'Declared file contracts and saved native task states; movement means processing inputs, not measured byte traffic.'}
