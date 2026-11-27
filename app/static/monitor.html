@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MissionDeck | Live monitor</title>
+<link rel="stylesheet" href="/static/monitor.css">
+<script src="/static/monitor.js" defer></script>
+</head>
+<body>
+<main>
+<header><div><p class="eyebrow">MISSIONDECK / LOCAL OBSERVATION</p><h1>Agent activity</h1><p class="muted">Native Orca session status · read-only</p></div><button id="refresh" type="button">Refresh snapshot</button></header>
+<p class="notice">A reported working state does not prove tool execution. This view does not launch, stop, retry, or prompt any agent. <a href="/index.html">Open mission control →</a> to create a mission and inspect its plan and evidence. Live mission acceptance is pending.</p>
+<div class="metrics" aria-label="Snapshot counts">
+<section><span>Sessions shown</span><strong id="count">—</strong></section>
+<section><span>Reported working</span><strong id="working">—</strong></section>
+<section><span>Working without assistant output</span><strong id="silent">—</strong></section>
+</div>
+<p id="status" role="status" aria-live="polite">No snapshot yet.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">Agent / session</th><th scope="col">Reported state</th><th scope="col">Workspace / repo</th><th scope="col">Assistant output present</th><th scope="col">Orca update</th></tr></thead><tbody id="sessions"></tbody></table></div>
+<p class="muted">Titles, prompts, message contents and full handles are intentionally excluded. Home workspace sessions are marked. No background refresh.</p>
+</main>
+</body>
+</html>

@@ -1,5 +1,7 @@
 /* MissionDeck — restrained industrial dark navy */
 
+[hidden] { display: none !important; }
+
 :root {
   --bg-deep: #0b1220;
   --bg-panel: #111a2b;
@@ -964,6 +966,24 @@ a:hover {
   stroke: var(--accent-border);
   stroke-width: 1.25;
 }
+
+.notice {
+  padding: 0.85rem 1rem;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.nav-item { text-decoration: none; }
+.event-list { padding-left: 1.2rem; color: var(--text-muted); }
+.event-list li { padding: 0.35rem 0; overflow-wrap: anywhere; }
+.evidence-item { padding: 0.5rem 0; }
+.evidence-item summary { cursor: pointer; overflow-wrap: anywhere; }
+.form-error, .alert, .mission-meta, .task-card, .worker-card { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mission-row-meta { grid-column: 1 / -1; }
+.dag-svg [role="button"] { cursor: pointer; }
+.dag-svg [role="button"]:focus-visible rect { stroke: var(--info); stroke-width: 3; }
+.view, .tab-panel, .agent-row > *, .detail-body { min-width: 0; }
 
 /* Responsive: collapse detail below 1200px */
 

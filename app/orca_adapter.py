@@ -142,6 +142,8 @@ class OrcaAdapter:
             ) from exc
         if not isinstance(data, dict):
             raise OrcaError("invalid_json", f"JSON root must be object for {op_name}", {"op": op_name})
+        if data.get("ok") is False:
+            raise OrcaError("native_error", f"Orca rejected {op_name}", {"op": op_name})
         return data
 
     def _require_from(self, from_handle: str | None) -> str:
@@ -168,6 +170,9 @@ class OrcaAdapter:
 
     def agent_installed(self) -> dict[str, Any]:
         return self._run("agent_installed", ["agent", "installed", "--json"])
+
+    def agent_list(self) -> dict[str, Any]:
+        return self._run("agent_list", ["agent", "list", "--json"])
 
     def terminal_create(self, *, title: str) -> dict[str, Any]:
         return self._run(
