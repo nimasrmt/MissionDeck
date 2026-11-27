@@ -1,0 +1,57 @@
+# --- Secrets and local configuration (never publish) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+id_rsa*
+id_ed25519*
+credentials*
+secrets/
+
+# --- MissionDeck runtime state ---
+.orca-runs/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+*.egg-info/
+build/
+dist/
+coverage/
+
+# --- Node / frontend tooling ---
+node_modules/
+.cache/
+
+# --- Logs, temp files, archives ---
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.bak
+*.orig
+*.zip
+*.7z
+*.rar
+
+# --- Local scratch / editor state ---
+gate0_probe.txt
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MissionDeck</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <div id="app" class="app" data-view="missions">
+    <aside class="rail" aria-label="Primary">
+      <div class="rail-brand">
+        <span class="rail-mark" aria-hidden="true"></span>
+        <div class="rail-brand-text">
+          <span class="rail-title">MissionDeck</span>
+          <span class="rail-sub">Command Center</span>
+        </div>
+      </div>
+      <nav class="rail-nav" aria-label="Views">
+        <button type="button" class="nav-item is-active" data-nav="missions" aria-current="page">
+          <span class="nav-label">Missions</span>
+        </button>
+        <button type="button" class="nav-item" data-nav="agents">
+          <span class="nav-label">Agents</span>
+        </button>
+        <button type="button" class="nav-item" data-nav="artifacts">
+          <span class="nav-label">Artifacts</span>
+        </button>
+        <button type="button" class="nav-item" data-nav="settings">
+          <span class="nav-label">Settings</span>
+        </button>
+      </nav>
+      <div class="rail-status" id="connection-status" role="status" aria-live="polite">
+        <span class="status-dot status-dot--unknown" aria-hidden="true"></span>
+        <span class="status-text">Unknown</span>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1 class="page-title" id="page-title">Missions</h1>
+          <p class="page-sub" id="page-sub">Live mission index from the local API</p>
+        </div>
+        <div class="topbar-right">
+          <span id="freshness-badge" class="badge badge--muted" hidden>Stale</span>
+          <span id="auto-refresh-badge" class="badge badge--info" hidden>Auto-refresh off</span>
+          <span id="worker-cap-badge" class="badge badge--cap" title="App-originated workers in flight">Workers 0 / 2</span>
+          <button type="button" class="btn btn--ghost" id="btn-refresh-view" title="Refresh current view">Refresh</button>
+        </div>
+      </header>
+
+      <div class="workspace-body">
+        <main id="main" class="main" tabindex="-1">
+          <!-- Missions list -->
+          <section id="view-missions" class="view" data-view-panel="missions" aria-labelledby="page-title">
+            <div class="view-toolbar">
+              <button type="button" class="btn btn--primary" id="btn-new-mission">New mission</button>
+            </div>
+            <div id="missions-state" class="state-panel" hidden></div>
+            <div id="missions-list" class="mission-list" role="list"></div>
+          </section>
+
+          <!-- Mission composer -->
+          <section id="view-composer" class="view" data-view-panel="composer" hidden aria-labelledby="composer-heading">
+            <h2 id="composer-heading" class="sr-only">Mission composer</h2>
+            <form id="composer-form" class="composer" novalidate>
+              <div class="field">
+                <label for="field-title">Title</label>
+                <input id="field-title" name="title" type="text" maxlength="200" required autocomplete="off">
+              </div>
+              <div class="field">
+                <label for="field-objective">Objective</label>
+                <textarea id="field-objective" name="objective" rows="4" required></textarea>
+              </div>
+              <div class="field">
+                <label for="field-quality">Quality requirements</label>
+                <textarea id="field-quality" name="quality_requirements" rows="3"></textarea>
+              </div>
+              <div class="field">
+                <label for="field-scope">Scope</label>
+                <textarea id="field-scope" name="scope" rows="3"></textarea>
+              </div>
+              <div class="field">
+                <label for="field-constraints">Constraints</label>
+                <textarea id="field-constraints" name="constraints" rows="3"></textarea>
+              </div>
+              <div class="field">
+                <label for="field-coordinator">Coordinator</label>
+                <select id="field-coordinator" name="coordinator" required>
+                  <option value="">Loading agents…</option>
+                </select>
+                <p id="coordinator-hint" class="field-hint"></p>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn btn--ghost" id="btn-composer-cancel">Cancel</button>
+                <button type="submit" class="btn btn--primary" id="btn-create-mission">Create mission</button>
+              </div>
+              <p id="composer-error" class="form-error" role="alert" hidden></p>
+            </form>
+          </section>
+
+          <!-- Mission detail: plan / execution / delivery tabs -->
+          <section id="view-mission" class="view" data-view-panel="mission" hidden aria-labelledby="mission-heading">
+            <div class="mission-header">
+              <div class="mission-header-text">
+                <h2 id="mission-heading" class="mission-title"></h2>
+                <p id="mission-meta" class="mission-meta"></p>
+              </div>
+              <div class="mission-actions" id="mission-actions">
+                <button type="button" class="btn btn--primary" id="btn-plan" disabled>Plan mission</button>
+                <button type="button" class="btn btn--secondary" id="btn-approve" disabled>Approve plan</button>
+                <button type="button" class="btn btn--secondary" id="btn-start" disabled>Start execution</button>
+                <button type="button" class="btn btn--ghost" id="btn-mission-refresh" disabled>Refresh</button>
+                <button type="button" class="btn btn--danger" id="btn-cancel" disabled>Cancel</button>
+              </div>
+            </div>
+            <p id="mission-action-error" class="form-error" role="alert" hidden></p>
+            <div id="plan-errors" class="alert alert--error" hidden></div>
+
+            <div class="tabs" role="tablist" aria-label="Mission views">
+              <button type="button" class="tab is-active" role="tab" id="tab-plan" aria-controls="panel-plan" aria-selected="true" data-tab="plan">Plan</button>
+              <button type="button" class="tab" role="tab" id="tab-execution" aria-controls="panel-execution" aria-selected="false" data-tab="execution">Execution</button>
+              <button type="button" class="tab" role="tab" id="tab-delivery" aria-controls="panel-delivery" aria-selected="false" data-tab="delivery">Delivery</button>
+            </div>
+
+            <div id="panel-plan" class="tab-panel" role="tabpanel" aria-labelledby="tab-plan">
+              <div id="plan-empty" class="state-panel" hidden></div>
+              <div id="plan-content" class="plan-content" hidden>
+                <article class="plan-block">
+                  <h3>Mission summary</h3>
+                  <div id="plan-summary" class="prose" data-rtl-detect></div>
+                </article>
+                <article class="plan-block">
+                  <h3>Architecture</h3>
+                  <div id="plan-architecture" class="prose" data-rtl-detect></div>
+                </article>
+                <article class="plan-block">
+                  <h3>Selection rationale</h3>
+                  <div id="plan-rationale" class="prose" data-rtl-detect></div>
+                </article>
+                <article class="plan-block">
+                  <h3>Department lanes</h3>
+                  <ul id="plan-departments" class="chip-list"></ul>
+                </article>
+                <article class="plan-block">
+                  <h3>Dependency graph</h3>
+                  <div id="plan-dag" class="dag-host"></div>
+                </article>
+                <article class="plan-block">
+                  <h3>Tasks</h3>
+                  <div id="plan-tasks" class="task-grid"></div>
+                </article>
+              </div>
+            </div>
+
+            <div id="panel-execution" class="tab-panel" role="tabpanel" aria-labelledby="tab-execution" hidden>
+              <div class="exec-cap" id="exec-cap">
+                <span class="exec-cap-label">Active workers</span>
+                <span class="exec-cap-value" id="exec-cap-value">0 / 2</span>
+              </div>
+              <div id="execution-state" class="state-panel" hidden></div>
+              <div id="worker-cards" class="worker-grid" role="list"></div>
+            </div>
+
+            <div id="panel-delivery" class="tab-panel" role="tabpanel" aria-labelledby="tab-delivery" hidden>
+              <div id="delivery-state" class="state-panel" hidden></div>
+              <div id="delivery-content" class="delivery-grid" hidden>
+                <article class="plan-block">
+                  <h3>Artifacts</h3>
+                  <ul id="delivery-artifacts" class="link-list"></ul>
+                </article>
+                <article class="plan-block">
+                  <h3>Validation evidence</h3>
+                  <div id="delivery-validation"></div>
+                </article>
+                <article class="plan-block">
+                  <h3>Review</h3>
+                  <div id="delivery-review"></div>
+                </article>
+                <article class="plan-block">
+                  <h3>Quality gate</h3>
+                  <div id="delivery-quality"></div>
+                </article>
+                <article class="plan-block">
+                  <h3>Unresolved risks</h3>
+                  <ul id="delivery-risks" class="plain-list"></ul>
+                </article>
+                <article class="plan-block">
+                  <h3>Acceptance</h3>
+                  <div id="delivery-acceptance"></div>
+                </article>
+                <article class="plan-block">
+                  <h3>Escalation</h3>
+                  <p><a id="delivery-escalation" class="btn btn--ghost" href="#">Download escalation report</a></p>
+                </article>
+              </div>
+            </div>
+          </section>
+
+          <!-- Agents -->
+          <section id="view-agents" class="view" data-view-panel="agents" hidden aria-labelledby="agents-heading">
+            <h2 id="agents-heading" class="sr-only">Agents</h2>
+            <div id="agents-state" class="state-panel" hidden></div>
+            <div id="agents-matrix" class="matrix" role="table" aria-label="Capability matrix"></div>
+          </section>
+
+          <!-- Artifacts index -->
+          <section id="view-artifacts" class="view" data-view-panel="artifacts" hidden aria-labelledby="artifacts-heading">
+            <h2 id="artifacts-heading" class="sr-only">Artifacts</h2>
+            <div id="artifacts-state" class="state-panel" hidden></div>
+            <div id="artifacts-index" class="artifact-index"></div>
+          </section>
+
+          <!-- Settings -->
+          <section id="view-settings" class="view" data-view-panel="settings" hidden aria-labelledby="settings-heading">
+            <h2 id="settings-heading" class="sr-only">Settings</h2>
+            <form id="settings-form" class="settings-form" novalidate>
+              <div class="field">
+                <label for="setting-worker-cap">Worker cap (max 2)</label>
+                <input id="setting-worker-cap" name="worker_cap" type="number" min="1" max="2" step="1" value="2">
+              </div>
+              <div class="field">
+                <label for="setting-auto-refresh">Auto-refresh seconds (0 = off, max 60)</label>
+                <input id="setting-auto-refresh" name="auto_refresh_seconds" type="number" min="0" max="60" step="1" value="0">
+                <p class="field-hint">When enabled, the current view refreshes on this interval. Default is off.</p>
+              </div>
+              <div class="field field--checkbox">
+                <label>
+                  <input id="setting-redaction" name="redaction_enabled" type="checkbox" checked>
+                  Redaction enabled
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn btn--primary" id="btn-save-settings">Save settings</button>
+              </div>
+              <p id="settings-message" class="form-message" role="status" hidden></p>
+            </form>
+          </section>
+        </main>
+
+        <aside id="detail-panel" class="detail" aria-label="Task detail" hidden>
+          <div class="detail-header">
+            <h2 id="detail-title" class="detail-title">Task detail</h2>
+            <button type="button" class="btn btn--icon" id="btn-close-detail" aria-label="Close detail panel">×</button>
+          </div>
+          <div id="detail-body" class="detail-body">
+            <p class="muted">Select a task to inspect inputs, outputs, evidence, and controls.</p>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+
+  <script src="/static/graph.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
