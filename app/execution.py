@@ -1029,6 +1029,7 @@ You may write only these paths:
 - Do not start nested workers
 - Do not invent metrics or fake completion
 - Do not install packages
+- Do not change the selected model, provider, account or billing route; no paid fallback
 
 ## Outputs
 {json.dumps(pt.get('outputs') or [], indent=2)}

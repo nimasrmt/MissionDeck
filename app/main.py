@@ -239,13 +239,17 @@ def api_free_models() -> dict[str, Any]:
 
 @app.post("/api/free-models/refresh")
 def api_probe_free_models() -> dict[str, Any]:
-    return get_service().refresh_free_models()
+    data = get_service().refresh_free_models()
+    _capabilities_cache.update(data=None, at=0)
+    return data
 
 
 @app.put("/api/free-models/selection")
 def api_select_free_model(body: FreeModelBody) -> Any:
     try:
-        return get_service().select_free_model(body.model)
+        data = get_service().select_free_model(body.model)
+        _capabilities_cache.update(data=None, at=0)
+        return data
     except AppError as exc:
         return error_response(exc.code, exc.message, exc.details)
 
@@ -311,7 +315,7 @@ def api_team_plan(mission_id: str) -> Any:
     try:
         with MissionStartLock():
             return get_service()._start_plan_locked(mission_id, team=True)
-    except AppError as exc:
+    except (AppError, OrcaError) as exc:
         return error_response(exc.code, exc.message, exc.details)
 
 

@@ -155,4 +155,34 @@ class TeamServiceTests(unittest.TestCase):
             self.service._settle_task(saved['id'],gate['id'],'dispatch_check','done')
             self.assertEqual(self.service.get_mission(saved['id'])['tasks'][-1]['status'],expected)
 
+    def test_supervisors_and_selected_employees_share_two_slots_and_gate_the_next_block(self):
+        w=workflow()
+        for i in (2,3):
+            w['blocks'][0]['employees'].append({**copy.deepcopy(w['blocks'][0]['employees'][0]),'outputs':[f'team-test/part-{i}.md']})
+        saved=self.service.save_plan(self.mission['id'],{'team_workflow':w},0)
+        self.service.approve(saved['id'],1)
+        self.adapter.terminal_create.return_value={'handle':'term_team'}
+        self.adapter.run_create.return_value={'run_id':'run_team'}
+        self.adapter.task_create.side_effect=[{'task_id':f'native_{i}'} for i in range(8)]
+        self.adapter.worker_start.side_effect=[{'dispatch_id':f'dispatch_{i}'} for i in range(8)]
+        started=self.service.start(saved['id'])
+        self.assertEqual(self.adapter.worker_start.call_count,1)
+        self.conn.execute("UPDATE tasks SET status='succeeded' WHERE mission_id=? AND plan_task_id='B1_brief'",(saved['id'],))
+        self.conn.execute("UPDATE dispatches SET state='done' WHERE mission_id=?",(saved['id'],))
+        self.service._dispatch_ready(saved['id'])
+        self.assertEqual(self.service.count_active_dispatches(),2)
+        live=self.service.get_mission(saved['id'])
+        self.assertEqual(len([t for t in live['tasks'] if t['status']=='running']),2)
+        self.assertEqual(next(t for t in live['tasks'] if t['plan_task_id']=='B1_w3')['status'],'pending')
+        self.conn.execute("UPDATE tasks SET status='succeeded' WHERE mission_id=? AND role='team_employee' AND plan_task_id LIKE 'B1_%'",(saved['id'],))
+        self.conn.execute("UPDATE dispatches SET state='done' WHERE mission_id=?",(saved['id'],))
+        self.service._dispatch_ready(saved['id'])
+        self.assertEqual(self.service.count_active_dispatches(),1)
+        self.conn.execute("UPDATE tasks SET status='failed' WHERE mission_id=? AND plan_task_id='B1_check'",(saved['id'],))
+        self.conn.execute("UPDATE dispatches SET state='done' WHERE mission_id=?",(saved['id'],))
+        calls=self.adapter.worker_start.call_count
+        self.service._dispatch_ready(saved['id'])
+        self.assertEqual(self.adapter.worker_start.call_count,calls)
+        self.assertEqual(next(t for t in self.service.get_mission(saved['id'])['tasks'] if t['plan_task_id']=='B2_brief')['status'],'pending')
+
 if __name__=='__main__':unittest.main()
