@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 APP_VERSION = "1.0.0"
@@ -21,7 +22,8 @@ def _resolve_orca_exe() -> Path:
     Resolution order:
     1. ``MISSIONDECK_ORCA_EXE`` environment variable, when set.
     2. ``orca`` on ``PATH``.
-    3. The bare name ``orca``, resolved by the OS at call time.
+    3. On Windows, the existing CLI in the standard per-user Orca install.
+    4. The bare name ``orca``, resolved by the OS at call time.
 
     If the binary is absent the adapter reports Orca as unavailable; the app
     never substitutes a fake runtime.
@@ -30,7 +32,15 @@ def _resolve_orca_exe() -> Path:
     if override:
         return Path(override).expanduser()
     found = shutil.which("orca")
-    return Path(found) if found else Path("orca")
+    if found:
+        return Path(found)
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+        if local_app_data:
+            candidate = Path(local_app_data) / "Programs" / "Orca" / "resources" / "bin" / "orca.exe"
+            if candidate.is_absolute() and candidate.is_file():
+                return candidate
+    return Path("orca")
 
 
 ORCA_EXE = _resolve_orca_exe()

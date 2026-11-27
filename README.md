@@ -33,7 +33,7 @@ MissionDeck has one optional environment variable:
 
 | Variable | Purpose |
 |---|---|
-| `MISSIONDECK_ORCA_EXE` | Absolute path to the Orca CLI. Unset → resolve `orca` from `PATH`. |
+| `MISSIONDECK_ORCA_EXE` | Absolute path to the Orca CLI. Unset → resolve `orca` from `PATH`, then check the existing Windows install at `%LOCALAPPDATA%\Programs\Orca\resources\bin\orca.exe`. |
 
 MissionDeck does not require provider API keys in its own configuration; the local Orca runtime manages provider authentication. See [`.env.example`](.env.example); the app does not auto-load `.env` files.
 

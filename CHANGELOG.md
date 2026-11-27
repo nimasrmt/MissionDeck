@@ -2,6 +2,8 @@
 
 ## Unreleased - mission UI restoration
 
+- Discover an existing Orca CLI in its standard per-user Windows install when it is absent from PATH; explicit configuration and PATH retain priority.
+
 - Restore API-backed mission composer, plan graph and task inspector, execution and delivery views, agents, artifacts, and settings.
 - Keep saved-state refresh read-only; label explicit reconciliation and continued dispatch separately.
 - Link the default session monitor to mission control. Render planner/worker text as inert DOM text and support Persian content.
