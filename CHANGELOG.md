@@ -2,6 +2,8 @@
 
 ## Unreleased - mission UI restoration
 
+- Add a read-only, allowlisted CLI diagnostic for investigating real account/usage payload shapes without exporting credentials or account identities.
+
 - Discover an existing Orca CLI in its standard per-user Windows install when it is absent from PATH; explicit configuration and PATH retain priority.
 
 - Restore API-backed mission composer, plan graph and task inspector, execution and delivery views, agents, artifacts, and settings.

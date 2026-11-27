@@ -105,6 +105,8 @@ Eligibility is checked again before planning and task dispatch, outside the UI c
 
 ## Tests
 
+If the dashboard connects but account fields are unknown, run `python diagnose_orca.py` from this checkout. It only calls native status, installed-agent and account-list reads. The report allowlists field names, known enum values and quota numbers; it omits arbitrary text, identities, credentials and unknown dictionary keys. It does not write files or launch workers. Missing values in this report are not proof of depleted quota.
+
 ```powershell
 python -m pytest -q
 ```
