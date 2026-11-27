@@ -15,7 +15,7 @@ ID = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,15}$")
 KINDS = {"management", "specialist", "inspection"}
 
 
-def compile_team_workflow(workflow: Any, mission_id: str, objective: str,
+def _compile_v1(workflow: Any, mission_id: str, objective: str,
                           eligible_agents: set[str] | None = None) -> dict[str, Any]:
     errors: list[str] = []
     if not isinstance(workflow, dict) or workflow.get("version") != 1:
@@ -122,18 +122,25 @@ Files: {mission['scope']}
 Constraints: {mission['constraints']}
 Available routes (use ONLY these exact agent/model pairs): {json.dumps(allowed)}
 
-team_workflow has version 1 and blocks (1..8). Include management, the useful specialties,
+team_workflow has version 2 and blocks (1..8). Include management, the useful specialties,
 and a final inspection block. Each block has:
 - id: unique short letter-led ID
 - name, specialty, goal: clear nonempty strings
 - kind: management, specialist, or inspection
 - deps: IDs of prerequisite blocks, no cycles; inspection waits for all implementation blocks
-- supervisor: {{"agent": "eligible agent ID", "model": "verified model ID or unknown"}}
-- employees: 1..8 objects with agent, model, instruction, outputs (nonempty list of relative
+- For specialist blocks only: supervisor: {{"agent": "eligible agent ID", "model": "verified model ID or unknown"}}
+- For management: advisors: 1..4 objects with agent and model. These are consulting peers,
+  with no supervisor or employees. They produce advice, then a synthesis session publishes the manager brief.
+- For inspection: inspector: {{"agent": "eligible agent ID", "model": "verified model ID or unknown"}}.
+  This is a separate read-only inspection session, with no supervisor or employees.
+- For specialist blocks only: employees: 1..8 objects with agent, model, instruction, outputs (nonempty list of relative
   files), acceptance (nonempty observable criteria), optionally inputs, write_scope, validation.
 Use few employees for this test. Give each employee a distinct, small assignment and output
-file. No shared writes between concurrent jobs. Independent inspection employees inspect upstream
-outputs and write their own findings; they must not rewrite producer deliverables.
+file. No shared writes between concurrent jobs. The independent inspector reads upstream
+outputs and writes a scoped PASS/FAIL report; it must not rewrite producer deliverables.
+At the top of team_workflow include input: {{"text": "mission input", "files": []}},
+and delivery: {{"sources": ["final producer block IDs"], "inspector": "inspection block ID or null"}}.
+The inspector must transitively depend on all delivery sources. Select final producer blocks, not the inspector, as sources.
 Do not include task arrays or invent progress. MissionDeck compiles a supervisor brief, employee
 jobs and a supervisor PASS/FAIL gate for each block. At most two native sessions run at once.
 Do not launch any worker. No network, installs or spending for implementation unless the mission
@@ -143,3 +150,11 @@ python -m pytest <relative_path> -q.
 ## Worker completion contract
 {WORKER_COMPLETION_CONTRACT}
 '''
+
+
+def compile_team_workflow(workflow: Any, mission_id: str, objective: str,
+                          eligible_agents: set[str] | None = None) -> dict[str, Any]:
+    if isinstance(workflow, dict) and workflow.get("version") == 2:
+        from app.team_workflow_v2 import compile_v2
+        return compile_v2(workflow, mission_id, objective, eligible_agents)
+    return _compile_v1(workflow, mission_id, objective, eligible_agents)

@@ -254,6 +254,80 @@ def api_select_free_model(body: FreeModelBody) -> Any:
         return error_response(exc.code, exc.message, exc.details)
 
 
+@app.get("/api/agent-catalog")
+def api_agent_catalog() -> dict[str, Any]:
+    from app.agent_catalog import catalogue
+    from app.db import loads
+    service = get_service()
+    return catalogue(api_capabilities(), loads(get_setting(service.conn, "free_model_catalog"), {}))
+
+
+class ManagerMessageBody(BaseModel):
+    message: str = Field(min_length=1, max_length=12000)
+    advisors: list[dict[str, Any]]
+    block_id: str
+    request_id: str
+    workflow: dict[str, Any] | None = None
+
+
+@app.get("/api/missions/{mission_id}/manager")
+def api_manager_history(mission_id: str) -> Any:
+    from app.manager_dialogue import history
+    try:
+        return history(get_service(), mission_id)
+    except AppError as exc:
+        return error_response(exc.code, exc.message, exc.details)
+
+
+@app.post("/api/missions/{mission_id}/manager/messages")
+def api_manager_message(mission_id: str, body: ManagerMessageBody) -> Any:
+    from app.manager_dialogue import send
+    try:
+        return send(get_service(), mission_id, **body.model_dump())
+    except (AppError, OrcaError) as exc:
+        return error_response(exc.code, exc.message, exc.details)
+
+
+@app.post("/api/missions/{mission_id}/manager/refresh")
+def api_manager_refresh(mission_id: str) -> Any:
+    from app.manager_dialogue import refresh
+    try:
+        return refresh(get_service(), mission_id)
+    except (AppError, OrcaError) as exc:
+        return error_response(exc.code, exc.message, exc.details)
+
+
+@app.post("/api/missions/{mission_id}/manager/{turn_id}/apply")
+def api_manager_apply(mission_id: str, turn_id: str, body: ApproveBody) -> Any:
+    from app.manager_dialogue import apply_proposal
+    try:
+        return apply_proposal(get_service(), mission_id, turn_id, body.plan_version)
+    except AppError as exc:
+        return error_response(exc.code, exc.message, exc.details, 409 if exc.code == "version_conflict" else 400)
+
+
+@app.post("/api/missions/{mission_id}/manager/stop")
+def api_manager_stop(mission_id: str, body: CancelBody) -> Any:
+    from app.manager_dialogue import stop
+    from app.execution import MissionStartLock
+    if not body.confirm:
+        return error_response("validation", "confirm must be true")
+    try:
+        with MissionStartLock():
+            return stop(get_service(), mission_id)
+    except (AppError, OrcaError) as exc:
+        return error_response(exc.code, exc.message, exc.details)
+
+
+@app.get("/api/missions/{mission_id}/data-flow")
+def api_data_flow(mission_id: str) -> Any:
+    from app.data_flow import project_flow
+    try:
+        return project_flow(get_service().get_mission(mission_id))
+    except AppError as exc:
+        return error_response(exc.code, exc.message, exc.details)
+
+
 @app.get("/api/missions")
 def api_list_missions() -> dict[str, Any]:
     return {"missions": get_service().list_missions()}
@@ -346,7 +420,9 @@ def api_refresh(mission_id: str) -> dict[str, Any]:
 @app.post("/api/missions/{mission_id}/cancel")
 def api_cancel(mission_id: str, body: CancelBody) -> dict[str, Any]:
     try:
-        return get_service().cancel(mission_id, body.confirm)
+        from app.execution import MissionStartLock
+        with MissionStartLock():
+            return get_service().cancel(mission_id, body.confirm)
     except AppError as exc:
         return error_response(exc.code, exc.message, exc.details)  # type: ignore[return-value]
 

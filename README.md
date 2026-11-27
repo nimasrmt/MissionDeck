@@ -151,3 +151,9 @@ The same graph shows planned and executing steps. Pending tasks identify the dep
 Open `/teams.html` (also the browser entry from `/`) for a connected team canvas. Add Management, Specialist and Inspection blocks, assign one supervisor and 1–8 employees to each, then save, approve and start. Each block becomes a real supervisor brief, bounded employee jobs and a scoped PASS/FAIL gate. All actors share the two-session app cap. Existing step missions remain at `/index.html`.
 
 Free model setup can inspect the installed OpenCode catalog and pin a verified zero-price tool-capable route, without inference or key entry. Availability and quota still need live validation. [Persian architecture, provider research and test steps](docs/TEAM_CANVAS_FA.md).
+
+## Manager council and data handoffs
+
+The team canvas now supports peer-AI management councils (no supervisor/staff), persistent manager chat, an optional separate read-only inspector, and explicit input/final-delivery endpoints. Use **AI & agent library** for local images, eligibility and model selection; blocked routes stay visible but cannot launch. Sending a message consults the council only. **Use proposed workflow** saves a versioned draft for separate approval and execution.
+
+Data-flow motion means a saved native task is processing declared upstream inputs, not measured byte traffic. Click a connection to inspect recorded files, size and hash. All consultation and execution actors share the two-session cap. Local image provenance and licenses: [sources](docs/AGENT_IMAGE_SOURCES.md). [Persian guide](docs/TEAM_CANVAS_FA.md).

@@ -456,9 +456,15 @@ class MissionService:
         if not row or not row["eligible"]:
             raise AppError("agent_ineligible", f"Agent {agent} is not currently eligible",
                            {"reason": row["reason"] if row else "agent not reported"})
+        if agent == "opencode":
+            selected = model if model not in (None, "", "unknown") else row["model"]
+            catalog = loads(get_setting(self.conn, "free_model_catalog"), {})
+            if not selected_route(catalog, selected):
+                raise AppError("model_unverified", "This explicit OpenCode model has no current zero-price evidence")
+            return selected
         if model not in (None, "", "unknown", row.get("model")):
             raise AppError("model_unverified", "Explicit model route has not been verified")
-        return row["model"] if agent == "opencode" else model
+        return model
 
     # --- missions CRUD ---
 
@@ -506,7 +512,7 @@ class MissionService:
 
     def list_missions(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(
-            "SELECT id, title, status, plan_status, created_at, updated_at, coordinator FROM missions ORDER BY created_at DESC"
+            "SELECT id, title, status, plan_status, created_at, updated_at, coordinator FROM missions WHERE id NOT IN (SELECT child_mission_id FROM manager_turns) ORDER BY created_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -598,6 +604,7 @@ class MissionService:
             "quality": self._quality_summary(m, tasks, artifacts),
             "freshness": utc_now(),
             "active_dispatches": active,
+            "global_active_dispatches": self.count_active_dispatches(),
             "can": can,
             "repair_count": m["repair_count"],
             "approved_at": m["approved_at"],
@@ -648,19 +655,7 @@ class MissionService:
         if mission_id:
             sql += " AND mission_id = ?"
             args = (mission_id,)
-        # Also count across all app missions for cap
-        if mission_id is None:
-            row = self.conn.execute(sql).fetchone()
-            return int(row["c"])
-        # For mission-specific, still useful; for global cap use all
-        row = self.conn.execute(
-            """
-            SELECT COUNT(*) AS c FROM dispatches
-            WHERE terminal_state IS NULL
-              AND state NOT IN ('done','failed','stopped','cancelled','released')
-            """
-        ).fetchone()
-        return int(row["c"])
+        return int(self.conn.execute(sql, args).fetchone()["c"])
 
     # --- planning ---
 
@@ -804,7 +799,9 @@ class MissionService:
                         if not isinstance(block, dict): continue
                         staff = block.get("employees")
                         if not isinstance(staff, list): staff = []
-                        for actor in [block.get("supervisor"), *staff]:
+                        advisors = block.get("advisors")
+                        if not isinstance(advisors, list): advisors = []
+                        for actor in [block.get("supervisor"), block.get("inspector"), *staff, *advisors]:
                             if isinstance(actor, dict) and actor.get("agent") == "opencode" and actor.get("model") in (None, "", "unknown"):
                                 actor["model"] = pin or "unknown"
                     plan = compile_team_workflow(plan["team_workflow"], mission_id, mission["objective"], self.eligible_agent_ids())
@@ -1059,6 +1056,9 @@ You may write only these paths:
                 "SELECT * FROM tasks WHERE mission_id = ?", (mission_id,)
             ).fetchall()
         ]
+        # Chat councils and execution runs share a terminal; reclaim this Run before mutation.
+        if run_id:
+            self.adapter.run_use(run_id=run_id, from_handle=handle)
         status_by_plan = {t["plan_task_id"]: t["status"] for t in tasks}
         for t in tasks:
             if t["status"] != "pending" or t["dispatch_id"]:
@@ -1123,6 +1123,11 @@ You may write only these paths:
 
     def _refresh_locked(self, mission_id: str) -> dict[str, Any]:
         m = self.get_mission_row(mission_id)
+        if m["status"] == "cancelled":
+            for row in self.conn.execute("SELECT native_dispatch_id, task_id FROM dispatches WHERE mission_id = ? AND terminal_state IS NULL", (mission_id,)).fetchall():
+                self._reconcile_dispatch(mission_id, row["native_dispatch_id"], planner=False, task_id=row["task_id"])
+            # Observation only: cancellation must never dispatch another worker.
+            return self.get_mission(mission_id)
         # Reconcile planner
         if m["status"] == "planning" and m["planner_dispatch_id"]:
             self._reconcile_dispatch(mission_id, m["planner_dispatch_id"], planner=True)
@@ -1370,13 +1375,19 @@ You may write only these paths:
         m = self.get_mission_row(mission_id)
         if m["status"] in TERMINAL_MISSION_STATUSES:
             raise AppError("invalid_state", "Mission already terminal")
+        # A mission stop includes only its own explicitly requested council consultations.
+        for child in self.conn.execute("SELECT id, child_mission_id FROM manager_turns WHERE parent_mission_id = ?", (mission_id,)).fetchall():
+            state = self.get_mission(child["child_mission_id"])
+            if state["can"]["cancel"]:
+                self.cancel(child["child_mission_id"], True)
+            self.conn.execute("UPDATE manager_turns SET status = CASE WHEN status = 'ready' THEN status ELSE 'failed' END, error = CASE WHEN status = 'ready' THEN error ELSE 'Stopped with parent mission' END, updated_at = ? WHERE id = ?", (utc_now(), child["id"]))
         write_checkpoint(mission_id, "cancel", {"status": m["status"]})
         self.conn.execute(
             "UPDATE missions SET cancel_requested = 1, updated_at = ? WHERE id = ?",
             (utc_now(), mission_id),
         )
         rows = self.conn.execute(
-            "SELECT native_dispatch_id FROM dispatches WHERE mission_id = ? AND terminal_state IS NULL",
+            "SELECT native_dispatch_id, task_id FROM dispatches WHERE mission_id = ? AND terminal_state IS NULL",
             (mission_id,),
         ).fetchall()
         for row in rows:
@@ -1384,6 +1395,8 @@ You may write only these paths:
                 self.adapter.worker_stop(dispatch_id=row["native_dispatch_id"])
             except OrcaError:
                 pass
+            # A stop request does not free capacity until native state confirms settlement.
+            self._reconcile_dispatch(mission_id, row["native_dispatch_id"], planner=False, task_id=row["task_id"])
         self.conn.execute(
             "UPDATE missions SET status = 'cancelled', updated_at = ? WHERE id = ?",
             (utc_now(), mission_id),

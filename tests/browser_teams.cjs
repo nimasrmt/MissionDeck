@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http');
 const {chromium}=require('playwright');
 let browser,server,base;
-before(async()=>{const root=path.resolve(__dirname,'../app/static');server=http.createServer((req,res)=>{const name=req.url==='/'?'index.html':req.url.replace(/^\/static\//,'').replace(/^\//,'').split('?')[0];if(!/^[a-z.-]+\.(html|css|js)$/.test(name)||!fs.existsSync(path.join(root,name))){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html');res.end(fs.readFileSync(path.join(root,name)));});await new Promise(r=>server.listen(0,'127.0.0.1',r));base=`http://127.0.0.1:${server.address().port}`;browser=await chromium.launch({headless:true});});
+before(async()=>{const root=path.resolve(__dirname,'../app/static');server=http.createServer((req,res)=>{const name=req.url==='/'?'index.html':req.url.replace(/^\/static\//,'').replace(/^\//,'').split('?')[0];if(!/^[a-z.-]+\.(html|css|js|json)$/.test(name)||!fs.existsSync(path.join(root,name))){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':name.endsWith('.json')?'application/json':'text/html');res.end(fs.readFileSync(path.join(root,name)));});await new Promise(r=>server.listen(0,'127.0.0.1',r));base=`http://127.0.0.1:${server.address().port}`;browser=await chromium.launch({headless:true});});
 after(async()=>{await browser?.close();await new Promise(r=>server?.close(r));});
 const agent={agent:'cursor',model:'unknown'};
 function workflow(){return {version:1,blocks:[{id:'B1',name:'Management',specialty:'Planning',kind:'management',goal:'Coordinate checked outputs',deps:[],supervisor:{...agent},employees:[{...agent,instruction:'Write the brief',outputs:['report.md'],acceptance:['Checked']}],position:{x:100,y:130}},{id:'B2',name:'Engineering',specialty:'Implementation',kind:'specialist',goal:'Implement the feature',deps:['B1'],supervisor:{...agent},employees:[{...agent,instruction:'Implement',outputs:['result.md'],acceptance:['Checked']}],position:{x:470,y:130}},{id:'B3',name:'Inspection',specialty:'Quality assurance',kind:'inspection',goal:'Inspect the outputs',deps:['B2'],supervisor:{...agent},employees:[{...agent,instruction:'Inspect',outputs:['findings.md'],acceptance:['Checked']}],position:{x:840,y:130}}]};}
@@ -21,6 +21,7 @@ async function setup(initial=mission(),url='/teams.html'){
    current={...current,plan:{team_workflow:body.plan},plan_version:current.plan_version+1,status:'awaiting_approval',can:{...current.can,approve:true,plan:false}};return send(current);
  }
  if(p==='/api/missions/mis_team')return send(current);
+ if(p==='/api/missions/mis_team/data-flow')return send({edges:[]});
  if(p==='/api/free-models/refresh'||p==='/api/free-models/selection')return send({status:'ok',reason:'Zero-price catalog checked',models:[{id:'opencode/example-free'}],selected:method==='PUT'?'opencode/example-free':null});
  if(p==='/api/free-models')return send({models:[]});
  return send({error:{message:`Unexpected ${p}`}},404);
@@ -35,15 +36,15 @@ test('build specialist blocks, choose employee count, connect dependencies, reje
  await page.locator('[data-kind="specialist"]').click();
  await page.getByLabel('Number of employees (1–8)').fill('2');await page.getByLabel('Number of employees (1–8)').press('Tab');
  await page.locator('[data-kind="inspection"]').click();
- await page.getByRole('button',{name:'Close settings'}).click();
- assert.equal(await page.locator('.team-node').count(),3);assert.equal(await page.locator('.satellite.supervisor').count(),3);assert.equal(await page.locator('.satellite.employee').count(),4);
+ await page.getByRole('button',{name:'Close settings'}).click();await page.getByRole('button',{name:'Fit',exact:true}).click();
+ assert.equal(await page.locator('.team-node').count(),3);assert.equal(await page.locator('.satellite.supervisor').count(),1);assert.equal(await page.locator('.satellite.employee').count(),2);assert.equal(await page.locator('.satellite.council-member').count(),1);assert.equal(await page.locator('.satellite.independent-inspector').count(),1);
  await page.getByRole('button',{name:'Output Management',exact:true}).click();await page.getByRole('button',{name:'Input Specialist team',exact:true}).click();
  await page.getByRole('button',{name:'Output Specialist team',exact:true}).click();await page.getByRole('button',{name:'Input Inspection',exact:true}).click();
- assert.equal(await page.locator('.connection').count(),2);
+ assert.equal(await page.locator('.block-connection').count(),3);
  await page.getByRole('button',{name:'Output Inspection',exact:true}).click();await page.getByRole('button',{name:'Input Management',exact:true}).click();
- assert.match(await page.locator('#notice').innerText(),/cycle/);assert.equal(await page.locator('.connection').count(),2);
+ assert.match(await page.locator('#notice').innerText(),/cycle/);assert.equal(await page.locator('.block-connection').count(),3);
  await page.getByRole('button',{name:'Save workflow',exact:true}).click();await page.waitForFunction(()=>document.getElementById('mission-status').textContent==='awaiting_approval');
- const save=calls.find(c=>c.p.endsWith('/team-workflow'));assert.equal(save.method,'PUT');assert.equal(save.token,'team-token');assert.equal(save.body.plan.blocks[1].employees.length,2);assert.deepEqual(save.body.plan.blocks[2].deps,['B2']);
+ const save=calls.find(c=>c.p.endsWith('/team-workflow'));assert.equal(save.method,'PUT');assert.equal(save.token,'team-token');assert.equal(save.body.plan.blocks[1].employees.length,2);assert.ok(save.body.plan.blocks[2].deps.includes('B2'));assert.equal(save.body.plan.version,2);assert.equal(save.body.plan.blocks[0].supervisor,undefined);
  assert.equal(calls.filter(c=>c.method==='POST').length,0);assert.deepEqual(x.errors,[]);await page.getByRole('button',{name:'Fit',exact:true}).click();await screenshot(page,'team-canvas.png');await x.context.close();
 });
 

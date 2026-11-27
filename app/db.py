@@ -159,6 +159,26 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS manager_turns (
+    id TEXT PRIMARY KEY,
+    parent_mission_id TEXT NOT NULL,
+    block_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    child_mission_id TEXT NOT NULL,
+    message TEXT NOT NULL,
+    advisors_json TEXT NOT NULL,
+    reply_path TEXT NOT NULL,
+    reply_data_json TEXT,
+    status TEXT NOT NULL,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(parent_mission_id, request_id),
+    FOREIGN KEY(parent_mission_id) REFERENCES missions(id),
+    FOREIGN KEY(child_mission_id) REFERENCES missions(id)
+);
+CREATE INDEX IF NOT EXISTS manager_turn_parent ON manager_turns(parent_mission_id, created_at);
+
 CREATE TABLE IF NOT EXISTS audit (
     id TEXT PRIMARY KEY,
     ts TEXT NOT NULL,
