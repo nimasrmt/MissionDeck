@@ -321,7 +321,7 @@ class MissionService:
 
         if agent_id == "cursor":
             plan = (acct or {}).get("planType") or info.get("planType")
-            status_ok = (acct or {}).get("status", "ok") == "ok" or acct is None
+            status_ok = (acct or info).get("status") == "ok"
             billing = "included_plan"
             if installed and plan == "free" and status_ok:
                 eligible = True
@@ -330,13 +330,12 @@ class MissionService:
                 reason = "requires planType==free and status ok"
             evidence.append(f"planType={plan}")
         elif agent_id == "grok":
-            status_ok = (acct or info).get("status", "ok") == "ok"
+            status_ok = (acct or info).get("status") == "ok"
             oauth = bool((acct or info).get("oauth") or (acct or info).get("auth") == "oauth")
             weekly = (acct or info).get("weeklyWindow") or (acct or info).get("weekly_window")
             billing = "included_allowance"
-            if installed and status_ok and (oauth or acct is None) and (weekly is not None or acct is None):
-                # If account details missing, mark with nulls but keep policy-eligible when installed
-                eligible = installed and status_ok
+            if installed and status_ok and oauth and isinstance(weekly, dict) and weekly:
+                eligible = True
                 reason = "status ok with OAuth weekly allowance"
             else:
                 reason = "requires status ok, OAuth, weekly window"
@@ -346,15 +345,18 @@ class MissionService:
             evidence.append("oauth check")
         elif agent_id == "opencode":
             billing = "free_models"
-            eligible = installed
-            reason = "free models only; model opaque"
+            # A client being installed is not evidence of its selected model's
+            # price. Until a pinned free route is verified, do not dispatch it.
+            eligible = False
+            reason = "free model route unverified; dispatch blocked"
             model = "unknown"
         elif agent_id == "codex":
             billing = "quota"
-            used = (acct or info).get("quotaUsed") or (acct or info).get("quota_used") or (acct or info).get("quota")
-            if isinstance(used, (int, float)):
+            source = acct or info
+            used = next((source[k] for k in ("quotaUsed", "quota_used", "quota") if source.get(k) is not None), None)
+            if isinstance(used, (int, float)) and not isinstance(used, bool):
                 quota = used
-                eligible = installed and used < 100
+                eligible = installed and 0 <= used < 100 and source.get("status") == "ok"
                 reason = "eligible only if quota < 100%"
             else:
                 quota = None
@@ -385,6 +387,15 @@ class MissionService:
     def eligible_agent_ids(self) -> set[str]:
         caps = self.capabilities()
         return {a["id"] for a in caps["agents"] if a.get("eligible")}
+
+    def require_eligible(self, agent: str, model: str | None = None) -> None:
+        """Check current evidence before any worker dispatch, never a UI cache."""
+        row = next((a for a in self.capabilities()["agents"] if a["id"] == agent), None)
+        if not row or not row["eligible"]:
+            raise AppError("agent_ineligible", f"Agent {agent} is not currently eligible",
+                           {"reason": row["reason"] if row else "agent not reported"})
+        if model not in (None, "", "unknown", row.get("model")):
+            raise AppError("model_unverified", "Explicit model route has not been verified")
 
     # --- missions CRUD ---
 
@@ -589,6 +600,10 @@ class MissionService:
     # --- planning ---
 
     def start_plan(self, mission_id: str, *, repair: bool = False) -> dict[str, Any]:
+        with MissionStartLock():
+            return self._start_plan_locked(mission_id, repair=repair)
+
+    def _start_plan_locked(self, mission_id: str, *, repair: bool = False) -> dict[str, Any]:
         m = self.get_mission_row(mission_id)
         if m["status"] == "unknown":
             raise AppError("unknown_state", "Mission is in unknown state; cannot plan")
@@ -601,6 +616,10 @@ class MissionService:
             if m["status"] not in ("draft", "failed", "blocked") or m["plan_status"] == "generating":
                 raise AppError("invalid_state", "Plan not allowed in current state")
 
+        self.require_eligible(m["coordinator"])
+        cap = int(get_setting(self.conn, "worker_cap", str(WORKER_CAP_DEFAULT)) or WORKER_CAP_DEFAULT)
+        if self.count_active_dispatches() >= cap:
+            raise AppError("worker_cap", f"Active app dispatches at cap ({cap})")
         handle = self.ensure_coordinator_terminal()
         # Create run if needed
         run_id = m["run_id"]
@@ -681,10 +700,9 @@ class MissionService:
         plan_path = RUNS_DIR / mission_id / "plan.json"
         try:
             eligible = self.eligible_agent_ids()
-            # During offline tests, eligible may be empty; still validate schema
             plan = load_and_validate_plan_file(
                 plan_path,
-                eligible_agents=eligible if eligible else None,
+                eligible_agents=eligible,
             )
             self.conn.execute(
                 """UPDATE missions SET plan_json = ?, plan_status = 'valid', plan_errors_json = ?,
@@ -738,6 +756,9 @@ class MissionService:
             raise AppError("unknown_state", "Mission is unknown; cannot start")
         if m["status"] != "approved" or m["plan_status"] != "valid":
             raise AppError("invalid_state", "Mission must be approved with valid plan")
+
+        for task in loads(m["plan_json"], {}).get("tasks", []):
+            self.require_eligible(task["agent"], task.get("model"))
 
         # Guarded DB transition to prevent double-dispatch
         now = utc_now()
@@ -920,6 +941,7 @@ You may write only these paths:
                 continue
             if self.count_active_dispatches() >= cap:
                 break
+            self.require_eligible(t["agent"], t["model"])
             start = self.adapter.worker_start(
                 run_id=run_id,
                 task_id=t["native_task_id"],
@@ -966,6 +988,10 @@ You may write only these paths:
         self.conn.commit()
 
     def refresh(self, mission_id: str) -> dict[str, Any]:
+        with MissionStartLock():
+            return self._refresh_locked(mission_id)
+
+    def _refresh_locked(self, mission_id: str) -> dict[str, Any]:
         m = self.get_mission_row(mission_id)
         # Reconcile planner
         if m["status"] == "planning" and m["planner_dispatch_id"]:
@@ -1218,9 +1244,13 @@ You may write only these paths:
         return self.get_mission(mission_id)
 
     def retry_task(self, mission_id: str, task_id: str) -> dict[str, Any]:
+        with MissionStartLock():
+            return self._retry_task_locked(mission_id, task_id)
+
+    def _retry_task_locked(self, mission_id: str, task_id: str) -> dict[str, Any]:
         m = self.get_mission_row(mission_id)
-        if m["status"] == "unknown":
-            raise AppError("unknown_state", "Cannot retry in unknown state")
+        if m["status"] in ("unknown", "cancelled", "succeeded") or m["cancel_requested"]:
+            raise AppError("invalid_state", "Cannot retry in unknown or closed state")
         t = self.conn.execute(
             "SELECT * FROM tasks WHERE id = ? AND mission_id = ?", (task_id, mission_id)
         ).fetchone()
@@ -1230,6 +1260,7 @@ You may write only these paths:
             raise AppError("invalid_state", "Only failed/blocked tasks can be retried")
         if t["attempt"] >= MAX_TASK_RETRIES:
             raise AppError("retry_limit", "Maximum two retries reached")
+        self.require_eligible(t["agent"], t["model"])
         write_checkpoint(mission_id, f"retry-{t['plan_task_id']}", {"attempt": t["attempt"]})
         handle = self.ensure_coordinator_terminal()
         plan = loads(m["plan_json"], {})

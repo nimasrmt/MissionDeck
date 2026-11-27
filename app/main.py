@@ -378,7 +378,7 @@ def api_get_settings() -> dict[str, Any]:
     conn = get_conn(_db_path)
     return {
         "worker_cap": int(get_setting(conn, "worker_cap", "2") or 2),
-        "auto_refresh_seconds": int(get_setting(conn, "auto_refresh_seconds", "5") or 5),
+        "auto_refresh_seconds": int(get_setting(conn, "auto_refresh_seconds", "0") or 0),
         "redaction_enabled": (get_setting(conn, "redaction_enabled", "true") or "true").lower() == "true",
     }
 

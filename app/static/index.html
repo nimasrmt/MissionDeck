@@ -19,6 +19,7 @@
         </div>
       </div>
       <nav class="rail-nav" aria-label="Views">
+        <a class="nav-item" href="/">Agent activity ↗</a>
         <button type="button" class="nav-item is-active" data-nav="missions" aria-current="page">
           <span class="nav-label">Missions</span>
         </button>
@@ -52,8 +53,10 @@
         </div>
       </header>
 
-      <div class="workspace-body">
+      <div class="workspace-body detail-collapsed">
         <main id="main" class="main" tabindex="-1">
+          <p id="global-message" class="alert alert--error" role="alert" hidden></p>
+          <p id="workspace-notice" class="notice" dir="auto">Loading workspace…</p>
           <!-- Missions list -->
           <section id="view-missions" class="view" data-view-panel="missions" aria-labelledby="page-title">
             <div class="view-toolbar">
@@ -77,15 +80,15 @@
               </div>
               <div class="field">
                 <label for="field-quality">Quality requirements</label>
-                <textarea id="field-quality" name="quality_requirements" rows="3"></textarea>
+                <textarea id="field-quality" name="quality_requirements" rows="3" required></textarea>
               </div>
               <div class="field">
                 <label for="field-scope">Scope</label>
-                <textarea id="field-scope" name="scope" rows="3"></textarea>
+                <textarea id="field-scope" name="scope" rows="3" required></textarea>
               </div>
               <div class="field">
                 <label for="field-constraints">Constraints</label>
-                <textarea id="field-constraints" name="constraints" rows="3"></textarea>
+                <textarea id="field-constraints" name="constraints" rows="3" required></textarea>
               </div>
               <div class="field">
                 <label for="field-coordinator">Coordinator</label>
@@ -111,13 +114,16 @@
               </div>
               <div class="mission-actions" id="mission-actions">
                 <button type="button" class="btn btn--primary" id="btn-plan" disabled>Plan mission</button>
+                <button type="button" class="btn btn--secondary" id="btn-repair" hidden disabled>Repair plan (once)</button>
                 <button type="button" class="btn btn--secondary" id="btn-approve" disabled>Approve plan</button>
                 <button type="button" class="btn btn--secondary" id="btn-start" disabled>Start execution</button>
-                <button type="button" class="btn btn--ghost" id="btn-mission-refresh" disabled>Refresh</button>
+                <button type="button" class="btn btn--secondary" id="btn-mission-refresh" disabled>Reconcile &amp; continue</button>
                 <button type="button" class="btn btn--danger" id="btn-cancel" disabled>Cancel</button>
               </div>
             </div>
             <p id="mission-action-error" class="form-error" role="alert" hidden></p>
+            <p class="field-hint">Refresh reads saved state. Reconcile &amp; continue checks Orca, validates completed outputs and may launch the next approved tasks. Planning, starting and retrying launch real workers.</p>
+            <p id="mission-snapshot" class="field-hint" role="status"></p>
             <div id="plan-errors" class="alert alert--error" hidden></div>
 
             <div class="tabs" role="tablist" aria-label="Mission views">
@@ -154,6 +160,7 @@
                   <div id="plan-tasks" class="task-grid"></div>
                 </article>
               </div>
+              <article class="plan-block"><h3>Mission events</h3><ol id="mission-events" class="event-list"></ol></article>
             </div>
 
             <div id="panel-execution" class="tab-panel" role="tabpanel" aria-labelledby="tab-execution" hidden>
@@ -225,7 +232,7 @@
               <div class="field">
                 <label for="setting-auto-refresh">Auto-refresh seconds (0 = off, max 60)</label>
                 <input id="setting-auto-refresh" name="auto_refresh_seconds" type="number" min="0" max="60" step="1" value="0">
-                <p class="field-hint">When enabled, the current view refreshes on this interval. Default is off.</p>
+                <p class="field-hint">Reads saved state only. It does not reconcile Orca or advance execution. Default is off.</p>
               </div>
               <div class="field field--checkbox">
                 <label>

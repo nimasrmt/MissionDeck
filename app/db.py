@@ -173,7 +173,7 @@ def init_db(db_path: Path | None = None) -> None:
     conn.executescript(SCHEMA)
     defaults = {
         "worker_cap": str(WORKER_CAP_DEFAULT),
-        "auto_refresh_seconds": "5",
+        "auto_refresh_seconds": "0",
         "redaction_enabled": "true",
         "coordinator_terminal": "",
     }
