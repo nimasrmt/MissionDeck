@@ -37,14 +37,18 @@ def project_models(text: str) -> list[dict]:
             continue
         if not MODEL_ID.fullmatch(mid) or not isinstance(cost, dict): continue
         if not endpoint or endpoint.scheme != "https" or endpoint.hostname != "opencode.ai" or endpoint.username or endpoint.password: continue
+        try:
+            if endpoint.port not in (None, 443): continue
+        except ValueError:
+            continue
         # The catalog must explicitly verify BOTH directions and tool execution.
         if any(type(cost.get(k)) not in (int, float) or not math.isfinite(cost[k]) or cost[k] != 0 for k in ("input", "output")): continue
         if caps.get("toolcall") is not True and obj.get("tool_call") is not True: continue
-        # Price-bearing cache variants must also explicitly be zero.
-        cache = cost.get("cache") or {}
-        if not isinstance(cache, dict) or any(type(v) not in (int, float) or not math.isfinite(v) or v != 0 for v in cache.values()): continue
-        variants = cost.get("context_over_200k")
-        if variants is not None and (not isinstance(variants, dict) or any(type(v) not in (int, float) or not math.isfinite(v) or v != 0 for v in variants.values())): continue
+        # Any additional declared charge (cache, reasoning, long context, etc.) must be zero.
+        def all_zero(value):
+            if isinstance(value, dict): return all(all_zero(v) for v in value.values())
+            return type(value) in (int, float) and math.isfinite(value) and value == 0
+        if not all_zero(cost): continue
         found[mid] = {"id": mid, "input_price": 0, "output_price": 0, "tool_call": True,
                       "quota": None, "source": "opencode models opencode --verbose"}
     return [found[k] for k in sorted(found)]

@@ -70,7 +70,9 @@ class FreeModelTests(unittest.TestCase):
         for obj in [model(id='paid',cost={'input':0,'output':1}),model(id='unknown',cost={'input':0}),
                     model(id='no-tools',capabilities={'toolcall':False}),model(id='spoof',api={'url':'https://opencode.ai.evil.test/v1'}),
                     model(id='cache-paid',cost={'input':0,'output':0,'cache':{'read':1}}),
-                    model(id='boolean',cost={'input':False,'output':0})]:out+=json.dumps(obj)+'\n'
+                    model(id='boolean',cost={'input':False,'output':0}),
+                    model(id='reasoning-paid',cost={'input':0,'output':0,'reasoning':1}),
+                    model(id='wrong-port',api={'url':'https://opencode.ai:8080/v1'})]:out+=json.dumps(obj)+'\n'
         projected=project_models(out)
         self.assertEqual([r['id'] for r in projected],['opencode/example-free'])
         self.assertIsNone(projected[0]['quota'])
