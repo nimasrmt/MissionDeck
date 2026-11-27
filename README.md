@@ -18,7 +18,7 @@ This repository is published as a **work in progress**, not a finished release.
 | Frontend JavaScript | **Missing** (`app/static/app.js`, `app/static/graph.js` are referenced by `index.html` but absent) |
 | Live end-to-end mission | **Not verified**; prior orchestration tests are not evidence of a full MissionDeck mission |
 
-Because the two frontend scripts are absent, **the browser UI is not currently operational**. The HTTP API has offline test coverage; live Orca integration is not yet accepted. The static shell cannot drive it. Do not treat the interface as working until `app.js` and `graph.js` are restored or rewritten.
+The full mission editor is not operational: its two scripts are absent. The default page is now a separate, read-only session monitor using the native `orca agent list --json` command. It shows reported states, not proof of actual tool execution, and never starts workers. Its live acceptance is pending. The original editor remains at `/index.html` for development only. Do not treat the mission workflow as working until the editor and real integration are validated.
 
 ## Requirements
 
@@ -45,7 +45,7 @@ cd <path-to-this-repo>
 .\run.ps1
 ```
 
-Open `http://127.0.0.1:8765`.
+Open `http://127.0.0.1:8765` for the read-only monitor. Refresh is manual. Starting the server no longer creates a coordinator or reconciles persisted missions automatically; explicit mission planning/start/refresh endpoints remain the development workflow. Persisted mission state can be stale until explicit reconciliation.
 
 Stop:
 

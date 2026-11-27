@@ -31,6 +31,7 @@ from app.db import (
 )
 from app.execution import AppError, MissionService
 from app.orca_adapter import OrcaAdapter, OrcaError
+from app.session_monitor import project_sessions
 from app.security import (
     SecurityError,
     check_csrf,
@@ -80,14 +81,8 @@ def error_response(code: str, message: str, details: dict | None = None, status:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     init_db(_db_path)
-    # Reconcile on startup when using real adapter
-    try:
-        if _adapter_factory is None:
-            svc = get_service()
-            svc.ensure_coordinator_terminal()
-            svc.reconcile_all()
-    except Exception:
-        pass
+    # Startup must not create terminals, re-bind runs, or dispatch workers.
+    # Existing mission state is a persisted snapshot until explicit reconciliation.
     yield
 
 
@@ -200,6 +195,23 @@ def api_health() -> dict[str, Any]:
         "workspace": str(WORKSPACE),
         "checked_at": utc_now(),
     }
+
+
+@app.get("/api/agent-sessions")
+def api_agent_sessions() -> Response:
+    """Read-only Orca session snapshot. No prompts, transcripts or dispatches."""
+    try:
+        payload = project_sessions(get_adapter().agent_list())
+    except OrcaError:
+        return JSONResponse(
+            status_code=503,
+            content={"error": {"code": "orca_unavailable", "message": "Orca session list unavailable."}},
+            headers={"Cache-Control": "no-store"},
+        )
+    return JSONResponse(
+        content={**payload, "checked_at": utc_now()},
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/api/capabilities")
@@ -413,4 +425,9 @@ def api_audit(limit: int = 100) -> dict[str, Any]:
 # Static UI (owned by frontend worker; mount if present)
 _static = WORKSPACE / "app" / "static"
 if _static.is_dir():
+    @app.get("/", include_in_schema=False)
+    def monitor_home() -> Response:
+        return FileResponse(_static / "monitor.html", headers={"Cache-Control": "no-store"})
+
+    app.mount("/static", StaticFiles(directory=str(_static)), name="assets")
     app.mount("/", StaticFiles(directory=str(_static), html=True), name="static")

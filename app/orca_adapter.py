@@ -169,6 +169,9 @@ class OrcaAdapter:
     def agent_installed(self) -> dict[str, Any]:
         return self._run("agent_installed", ["agent", "installed", "--json"])
 
+    def agent_list(self) -> dict[str, Any]:
+        return self._run("agent_list", ["agent", "list", "--json"])
+
     def terminal_create(self, *, title: str) -> dict[str, Any]:
         return self._run(
             "terminal_create",
