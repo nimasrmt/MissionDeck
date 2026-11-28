@@ -27,6 +27,8 @@ jobs:
           node --check app/static/graph.js
           node --check app/static/planner.js
           node --check app/static/monitor.js
+          node --check app/static/teams.js
+          node --check app/static/api-models.js
           test -f app/static/theme.css
   browser-contract:
     runs-on: ubuntu-latest
@@ -43,7 +45,7 @@ jobs:
       - name: Exercise frontend with isolated API fixtures
         env:
           MISSIONDECK_SCREENSHOT_DIR: ${{ runner.temp }}/missiondeck-ui
-        run: NODE_PATH="$RUNNER_TEMP/missiondeck-browser/node_modules" node --test tests/browser_smoke.cjs
+        run: NODE_PATH="$RUNNER_TEMP/missiondeck-browser/node_modules" node --test tests/browser_*.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

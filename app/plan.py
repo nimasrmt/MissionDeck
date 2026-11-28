@@ -98,6 +98,7 @@ def validate_plan(
     *,
     eligible_agents: Iterable[str] | None = None,
     require_independent_review: bool = False,
+    max_tasks: int = MAX_PLAN_TASKS,
 ) -> dict[str, Any]:
     errors: list[str] = []
     if not isinstance(plan, dict):
@@ -134,8 +135,8 @@ def validate_plan(
         tasks = []
     if len(tasks) == 0:
         errors.append("plan must contain at least one task")
-    if len(tasks) > MAX_PLAN_TASKS:
-        errors.append(f"plan may not contain more than {MAX_PLAN_TASKS} tasks")
+    if len(tasks) > max_tasks:
+        errors.append(f"plan may not contain more than {max_tasks} tasks")
 
     eligible = set(eligible_agents) if eligible_agents is not None else None
     task_ids: list[str] = []
@@ -302,6 +303,8 @@ def load_and_validate_plan_file(
     *,
     eligible_agents: Iterable[str] | None = None,
     require_independent_review: bool = False,
+    mission_id: str | None = None,
+    objective: str = "",
 ) -> dict[str, Any]:
     if not path.is_file():
         raise PlanValidationError([f"plan file missing: {path}"])
@@ -312,6 +315,11 @@ def load_and_validate_plan_file(
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise PlanValidationError([f"plan JSON invalid: {exc}"]) from exc
+    if isinstance(data, dict) and "team_workflow" in data:
+        from app.team_workflow import compile_team_workflow
+        if not mission_id: raise PlanValidationError(["Team plans require a mission context"])
+        return compile_team_workflow(data["team_workflow"], mission_id, objective,
+                                     set(eligible_agents) if eligible_agents is not None else None)
     return validate_plan(
         data,
         eligible_agents=eligible_agents,

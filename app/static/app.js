@@ -1,6 +1,7 @@
 /* MissionDeck: API-backed views. GETs observe; explicit actions advance missions. */
 "use strict";
 (() => {
+  if (location.pathname === "/") { location.replace("/teams.html"); return; }
   const $ = id => document.getElementById(id);
   const state = {view: "missions", mission: null, tab: "plan", token: null, busy: false,
     capabilities: null, settings: {worker_cap: 2, auto_refresh_seconds: 0}, timer: null,

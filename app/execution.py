@@ -45,6 +45,8 @@ from app.plan import (
     validate_plan,
 )
 from app.security import SecurityError, cap_bytes, redact, resolve_under_workspace
+from app.team_workflow import compile_team_workflow, team_planner_spec
+from app.free_models import probe_opencode, selected_route
 
 
 class AppError(Exception):
@@ -383,9 +385,28 @@ class MissionService:
             billing = "free_models"
             # A client being installed is not evidence of its selected model's
             # price. Until a pinned free route is verified, do not dispatch it.
-            eligible = False
-            reason = "free model route unverified; dispatch blocked"
-            model = "unknown"
+            catalog = loads(get_setting(self.conn, "free_model_catalog"), {})
+            pinned = get_setting(self.conn, "free_model_pin")
+            route = selected_route(catalog, pinned)
+            eligible = bool(installed and route)
+            reason = "pinned zero-price tool-capable route; quota unknown" if eligible else "free model route unverified; dispatch blocked"
+            model = pinned if route else "unknown"
+            if route: evidence.extend(["source=OpenCode model catalog", "input_price=0", "output_price=0", "tool_call=true"])
+            from app.api_models import APIConnections
+            custom = APIConnections(self.conn, WORKSPACE).routes()
+            enabled = {r["id"] for r in custom if r["eligible"]}
+            user_pin = get_setting(self.conn, "user_api_pin")
+            if enabled:
+                eligible = installed
+                if not route:
+                    reason = "Choose an enabled API model; its cost and quota are unknown"
+                    billing = "user_supplied_api"
+            if user_pin:
+                model = user_pin if user_pin in enabled else "unknown"
+                eligible = installed and user_pin in enabled
+                billing = "user_supplied_api"
+                reason = "Your explicitly selected API; cost and quota unknown" if eligible else "Selected API needs a new test; no fallback"
+                evidence = ["source=user API settings", "price=unknown", "quota=unknown"]
         elif agent_id == "codex":
             billing = "quota"
             source = acct or info
@@ -424,17 +445,50 @@ class MissionService:
         caps = self.capabilities()
         return {a["id"] for a in caps["agents"] if a.get("eligible")}
 
-    def require_eligible(self, agent: str, model: str | None = None) -> None:
+    def refresh_free_models(self) -> dict[str, Any]:
+        catalog = probe_opencode()
+        set_setting(self.conn, "free_model_catalog", dumps(catalog))
+        self.conn.commit()
+        return {**catalog, "selected": get_setting(self.conn, "free_model_pin")}
+
+    def select_free_model(self, model: str) -> dict[str, Any]:
+        catalog = loads(get_setting(self.conn, "free_model_catalog"), {})
+        if not selected_route(catalog, model):
+            raise AppError("model_unverified", "Refresh the free catalog and choose a verified route")
+        set_setting(self.conn, "free_model_pin", model)
+        set_setting(self.conn, "user_api_pin", "")
+        add_audit(self.conn, "select_free_model", {"model": model})
+        self.conn.commit()
+        return {**catalog, "selected": model}
+
+    def require_eligible(self, agent: str, model: str | None = None) -> str | None:
         """Check current evidence before any worker dispatch, never a UI cache."""
+        requested = model if model not in (None, "", "unknown") else get_setting(self.conn, "user_api_pin") if model is None else None
+        custom = agent == "opencode" and isinstance(requested, str) and requested.startswith("mdapi_")
+        if agent == "opencode" and not custom:
+            self.refresh_free_models()
         capabilities = self.capabilities()
         if not capabilities["orca"]["available"]:
             raise AppError("orca_unavailable", "Orca did not report a ready, connected runtime")
         row = next((a for a in capabilities["agents"] if a["id"] == agent), None)
-        if not row or not row["eligible"]:
+        if not row or (not row["eligible"] and not (agent == "opencode" and row.get("installed"))):
             raise AppError("agent_ineligible", f"Agent {agent} is not currently eligible",
                            {"reason": row["reason"] if row else "agent not reported"})
+        if agent == "opencode":
+            if custom:
+                from app.api_models import APIConnections, APIModelError
+                try:
+                    return APIConnections(self.conn, WORKSPACE).require(requested)
+                except APIModelError as exc:
+                    raise AppError(exc.code, exc.message) from exc
+            selected = model if model not in (None, "", "unknown") else row["model"]
+            catalog = loads(get_setting(self.conn, "free_model_catalog"), {})
+            if not selected_route(catalog, selected):
+                raise AppError("model_unverified", "This explicit OpenCode model has no current zero-price evidence")
+            return selected
         if model not in (None, "", "unknown", row.get("model")):
             raise AppError("model_unverified", "Explicit model route has not been verified")
+        return model
 
     # --- missions CRUD ---
 
@@ -482,7 +536,7 @@ class MissionService:
 
     def list_missions(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(
-            "SELECT id, title, status, plan_status, created_at, updated_at, coordinator FROM missions ORDER BY created_at DESC"
+            "SELECT id, title, status, plan_status, created_at, updated_at, coordinator FROM missions WHERE id NOT IN (SELECT child_mission_id FROM manager_turns) ORDER BY created_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -574,6 +628,8 @@ class MissionService:
             "quality": self._quality_summary(m, tasks, artifacts),
             "freshness": utc_now(),
             "active_dispatches": active,
+            "global_active_dispatches": self.count_active_dispatches(),
+            "native_checked_at": self.conn.execute("SELECT MAX(last_seen_at) FROM dispatches WHERE mission_id = ?", (mission_id,)).fetchone()[0],
             "can": can,
             "repair_count": m["repair_count"],
             "approved_at": m["approved_at"],
@@ -624,19 +680,7 @@ class MissionService:
         if mission_id:
             sql += " AND mission_id = ?"
             args = (mission_id,)
-        # Also count across all app missions for cap
-        if mission_id is None:
-            row = self.conn.execute(sql).fetchone()
-            return int(row["c"])
-        # For mission-specific, still useful; for global cap use all
-        row = self.conn.execute(
-            """
-            SELECT COUNT(*) AS c FROM dispatches
-            WHERE terminal_state IS NULL
-              AND state NOT IN ('done','failed','stopped','cancelled','released')
-            """
-        ).fetchone()
-        return int(row["c"])
+        return int(self.conn.execute(sql, args).fetchone()["c"])
 
     # --- planning ---
 
@@ -644,7 +688,7 @@ class MissionService:
         with MissionStartLock():
             return self._start_plan_locked(mission_id, repair=repair)
 
-    def _start_plan_locked(self, mission_id: str, *, repair: bool = False) -> dict[str, Any]:
+    def _start_plan_locked(self, mission_id: str, *, repair: bool = False, team: bool = False) -> dict[str, Any]:
         m = self.get_mission_row(mission_id)
         if m["status"] == "unknown":
             raise AppError("unknown_state", "Mission is in unknown state; cannot plan")
@@ -657,7 +701,7 @@ class MissionService:
             if m["status"] not in ("draft", "failed", "blocked") or m["plan_status"] == "generating":
                 raise AppError("invalid_state", "Plan not allowed in current state")
 
-        self.require_eligible(m["coordinator"])
+        planner_model = self.require_eligible(m["coordinator"])
         cap = int(get_setting(self.conn, "worker_cap", str(WORKER_CAP_DEFAULT)) or WORKER_CAP_DEFAULT)
         if self.count_active_dispatches() >= cap:
             raise AppError("worker_cap", f"Active app dispatches at cap ({cap})")
@@ -680,7 +724,8 @@ class MissionService:
         specs_dir.mkdir(parents=True, exist_ok=True)
         spec_path = specs_dir / ("plan-repair.md" if repair else "plan.md")
         spec_path.write_text(
-            planner_spec_text(mission_id, dict(m), repair=repair),
+            (team_planner_spec(mission_id, dict(m), self.capabilities()["agents"]) if team
+             else planner_spec_text(mission_id, dict(m), repair=repair)),
             encoding="utf-8",
         )
 
@@ -699,6 +744,7 @@ class MissionService:
             task_id=native_task_id,
             agent=m["coordinator"],
             from_handle=handle,
+            **({"model": planner_model} if m["coordinator"] == "opencode" else {}),
         )
         dispatch_id = extract_id(start, "dispatch_id", "dispatch", "id")
         if not dispatch_id:
@@ -717,7 +763,7 @@ class MissionService:
                 dispatch_id,
                 native_task_id,
                 m["coordinator"],
-                None,
+                planner_model,
                 "running",
                 "unknown",
                 None,
@@ -741,10 +787,8 @@ class MissionService:
         plan_path = RUNS_DIR / mission_id / "plan.json"
         try:
             eligible = self.eligible_agent_ids()
-            plan = load_and_validate_plan_file(
-                plan_path,
-                eligible_agents=eligible,
-            )
+            plan = load_and_validate_plan_file(plan_path, eligible_agents=eligible,
+                                               mission_id=mission_id, objective=self.get_mission_row(mission_id)["objective"])
             self.conn.execute(
                 """UPDATE missions SET plan_json = ?, plan_status = 'valid', plan_errors_json = ?,
                    status = 'awaiting_approval', updated_at = ? WHERE id = ?""",
@@ -770,7 +814,24 @@ class MissionService:
             if plan_version != mission["plan_version"]:
                 raise AppError("version_conflict", "The saved plan changed. Reload it before applying edits")
             try:
-                validate_plan(plan, eligible_agents=self.eligible_agent_ids())
+                if "team_workflow" in plan:
+                    from copy import deepcopy
+                    plan = deepcopy(plan)
+                    pin = get_setting(self.conn, "user_api_pin") or get_setting(self.conn, "free_model_pin")
+                    source = plan["team_workflow"]
+                    source_blocks = source.get("blocks", []) if isinstance(source, dict) else []
+                    for block in source_blocks if isinstance(source_blocks, list) else []:
+                        if not isinstance(block, dict): continue
+                        staff = block.get("employees")
+                        if not isinstance(staff, list): staff = []
+                        advisors = block.get("advisors")
+                        if not isinstance(advisors, list): advisors = []
+                        for actor in [block.get("supervisor"), block.get("inspector"), *staff, *advisors]:
+                            if isinstance(actor, dict) and actor.get("agent") == "opencode" and actor.get("model") in (None, "", "unknown"):
+                                actor["model"] = pin or "unknown"
+                    plan = compile_team_workflow(plan["team_workflow"], mission_id, mission["objective"], self.eligible_agent_ids())
+                else:
+                    validate_plan(plan, eligible_agents=self.eligible_agent_ids())
             except PlanValidationError as exc:
                 raise AppError("invalid_plan", "The workflow has validation errors", {"errors": exc.errors}) from exc
             for task in plan["tasks"]:
@@ -835,8 +896,12 @@ class MissionService:
         if m["status"] != "approved" or m["plan_status"] != "valid":
             raise AppError("invalid_state", "Mission must be approved with valid plan")
 
+        checked_routes: set[tuple[str, str | None]] = set()
         for task in loads(m["plan_json"], {}).get("tasks", []):
-            self.require_eligible(task["agent"], task.get("model"))
+            route = (task["agent"], task.get("model"))
+            if route not in checked_routes:
+                self.require_eligible(*route)
+                checked_routes.add(route)
 
         # Guarded DB transition to prevent double-dispatch
         now = utc_now()
@@ -969,6 +1034,11 @@ Mission objective: {mission.get('objective')}
 ## Role
 {pt.get('role')}
 
+## Assignment
+{pt.get('instruction') or pt['title']}
+
+Specialty: {pt.get('specialty') or pt.get('department')}
+
 ## Inputs
 {json.dumps(pt.get('inputs') or [], indent=2)}
 
@@ -981,6 +1051,7 @@ You may write only these paths:
 - Do not start nested workers
 - Do not invent metrics or fake completion
 - Do not install packages
+- Do not change the selected model, provider, account or billing route; no paid fallback
 
 ## Outputs
 {json.dumps(pt.get('outputs') or [], indent=2)}
@@ -1010,6 +1081,9 @@ You may write only these paths:
                 "SELECT * FROM tasks WHERE mission_id = ?", (mission_id,)
             ).fetchall()
         ]
+        # Chat councils and execution runs share a terminal; reclaim this Run before mutation.
+        if run_id:
+            self.adapter.run_use(run_id=run_id, from_handle=handle)
         status_by_plan = {t["plan_task_id"]: t["status"] for t in tasks}
         for t in tasks:
             if t["status"] != "pending" or t["dispatch_id"]:
@@ -1019,17 +1093,20 @@ You may write only these paths:
                 continue
             if self.count_active_dispatches() >= cap:
                 break
-            self.require_eligible(t["agent"], t["model"])
+            dispatch_model = self.require_eligible(t["agent"], t["model"])
             start = self.adapter.worker_start(
                 run_id=run_id,
                 task_id=t["native_task_id"],
                 agent=t["agent"],
                 from_handle=handle,
-                model=t["model"],
+                model=dispatch_model,
             )
             dispatch_id = extract_id(start, "dispatch_id", "dispatch", "id")
             if not dispatch_id:
                 continue
+            if dispatch_model != t["model"]:
+                self.conn.execute("UPDATE tasks SET model = ? WHERE id = ?", (dispatch_model, t["id"]))
+                t["model"] = dispatch_model
             dsp = new_id("dsp")
             self.conn.execute(
                 """INSERT INTO dispatches(
@@ -1071,6 +1148,11 @@ You may write only these paths:
 
     def _refresh_locked(self, mission_id: str) -> dict[str, Any]:
         m = self.get_mission_row(mission_id)
+        if m["status"] == "cancelled":
+            for row in self.conn.execute("SELECT native_dispatch_id, task_id FROM dispatches WHERE mission_id = ? AND terminal_state IS NULL", (mission_id,)).fetchall():
+                self._reconcile_dispatch(mission_id, row["native_dispatch_id"], planner=False, task_id=row["task_id"])
+            # Observation only: cancellation must never dispatch another worker.
+            return self.get_mission(mission_id)
         # Reconcile planner
         if m["status"] == "planning" and m["planner_dispatch_id"]:
             self._reconcile_dispatch(mission_id, m["planner_dispatch_id"], planner=True)
@@ -1164,7 +1246,7 @@ You may write only these paths:
         all_ok = state == "done"
         for rel in outputs:
             try:
-                path = resolve_under_workspace(rel, must_exist=True)
+                path = resolve_under_workspace(rel, must_exist=True, workspace=WORKSPACE)
             except Exception as exc:
                 all_ok = False
                 evidence.append({"type": "missing_output", "path": rel, "error": str(exc), "ts": utc_now()})
@@ -1195,6 +1277,42 @@ You may write only these paths:
             if result.get("status") != "ok":
                 all_ok = False
 
+        # Independent inspection cannot accept producer files that changed after their recorded handoff.
+        if t["role"] == "team_inspection":
+            plan = loads(self.get_mission_row(mission_id)["plan_json"], {})
+            contract = next((p for p in plan.get("tasks", []) if p["id"] == t["plan_task_id"]), {})
+            for rel in contract.get("inputs", []):
+                recorded = self.conn.execute("SELECT sha256 FROM artifacts WHERE mission_id = ? AND rel_path = ? AND verified = 1 ORDER BY rowid DESC LIMIT 1", (mission_id, rel)).fetchone()
+                if not recorded:
+                    continue
+                try:
+                    unchanged = sha256_file(resolve_under_workspace(rel, workspace=WORKSPACE, must_exist=True)) == recorded["sha256"]
+                except (SecurityError, OSError):
+                    unchanged = False
+                if not unchanged:
+                    all_ok = False
+                    evidence.append({"type": "inspection_input_changed", "path": rel, "ts": utc_now()})
+
+        # Team gates require a real scoped verdict; native done alone never opens the next block.
+        if t["role"] in ("team_check", "team_inspection"):
+            try:
+                if len(outputs) != 1: raise ValueError("One declared gate file is required")
+                target = resolve_under_workspace(outputs[0], must_exist=True, workspace=WORKSPACE)
+                if target.stat().st_size > 256 * 1024: raise ValueError("Gate file exceeds size limit")
+                gate = json.loads(target.read_text(encoding="utf-8"))
+                passed = (isinstance(gate, dict) and gate.get("verdict") == "PASS"
+                          and gate.get("dispatch_id") == dispatch_id
+                          and isinstance(gate.get("checks"), list) and bool(gate["checks"])
+                          and all(isinstance(c, dict) and c.get("passed") is True
+                                  and isinstance(c.get("criterion"), str) and c["criterion"].strip()
+                                  and isinstance(c.get("evidence"), str) and c["evidence"].strip() for c in gate["checks"])
+                          and isinstance(gate.get("findings"), list) and not gate["findings"])
+                evidence.append({"type": "team_gate", "verdict": "PASS" if passed else "FAIL", "ts": utc_now()})
+                if not passed: all_ok = False
+            except Exception:
+                all_ok = False
+                evidence.append({"type": "team_gate", "verdict": "INVALID", "ts": utc_now()})
+
         # Review verdict
         if t["role"] == "review":
             review_path = WORKSPACE / "review.json"
@@ -1205,7 +1323,7 @@ You may write only these paths:
             for rel in outputs:
                 if rel.replace("\\", "/").endswith("review.json"):
                     try:
-                        target = resolve_under_workspace(rel, must_exist=True)
+                        target = resolve_under_workspace(rel, must_exist=True, workspace=WORKSPACE)
                     except Exception:
                         target = None
             if target and target.is_file():
@@ -1298,13 +1416,19 @@ You may write only these paths:
         m = self.get_mission_row(mission_id)
         if m["status"] in TERMINAL_MISSION_STATUSES:
             raise AppError("invalid_state", "Mission already terminal")
+        # A mission stop includes only its own explicitly requested council consultations.
+        for child in self.conn.execute("SELECT id, child_mission_id FROM manager_turns WHERE parent_mission_id = ?", (mission_id,)).fetchall():
+            state = self.get_mission(child["child_mission_id"])
+            if state["can"]["cancel"]:
+                self.cancel(child["child_mission_id"], True)
+            self.conn.execute("UPDATE manager_turns SET status = CASE WHEN status = 'ready' THEN status ELSE 'failed' END, error = CASE WHEN status = 'ready' THEN error ELSE 'Stopped with parent mission' END, updated_at = ? WHERE id = ?", (utc_now(), child["id"]))
         write_checkpoint(mission_id, "cancel", {"status": m["status"]})
         self.conn.execute(
             "UPDATE missions SET cancel_requested = 1, updated_at = ? WHERE id = ?",
             (utc_now(), mission_id),
         )
         rows = self.conn.execute(
-            "SELECT native_dispatch_id FROM dispatches WHERE mission_id = ? AND terminal_state IS NULL",
+            "SELECT native_dispatch_id, task_id FROM dispatches WHERE mission_id = ? AND terminal_state IS NULL",
             (mission_id,),
         ).fetchall()
         for row in rows:
@@ -1312,6 +1436,8 @@ You may write only these paths:
                 self.adapter.worker_stop(dispatch_id=row["native_dispatch_id"])
             except OrcaError:
                 pass
+            # A stop request does not free capacity until native state confirms settlement.
+            self._reconcile_dispatch(mission_id, row["native_dispatch_id"], planner=False, task_id=row["task_id"])
         self.conn.execute(
             "UPDATE missions SET status = 'cancelled', updated_at = ? WHERE id = ?",
             (utc_now(), mission_id),
