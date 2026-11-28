@@ -130,7 +130,7 @@ test('API form saves a write-only key without inference, tests explicitly, and s
  assert.equal(state.apiTests,0);assert.equal(await page.locator('#api-form [name="api_key"]').inputValue(),'');assert.doesNotMatch(await page.locator('#api-dialog').innerText(),/test-only-key-never-returned/);
  assert.match(await page.locator('#api-model-message').innerText(),/No model request/);
  await page.locator('#test-api-model').click();await page.waitForFunction(()=>!document.getElementById('test-api-model').disabled);assert.equal(state.apiTests,1);
- assert.match(await page.locator('#api-connections').innerText(),/Tested/);await screenshot(page,'api-model-settings.png');
+ assert.match(await page.locator('#api-connections').innerText(),/Tested/);await page.setViewportSize({width:1366,height:768});const resultBox=await page.locator('#api-model-message').boundingBox(),useBox=await page.locator('#use-api-model').boundingBox();assert.ok(resultBox.y+resultBox.height<=768,'API test result must fit the laptop viewport');assert.ok(useBox.y+useBox.height<=768,'API selection must fit the laptop viewport');await screenshot(page,'api-model-settings.png');
  await page.locator('#close-api-models').click();await page.locator('[data-kind="management"]').click();
  await page.getByRole('group',{name:'Council AI 1',exact:true}).getByRole('button',{name:'Browse AI images and models'}).click();await page.locator('#catalog-filter').selectOption('apis');
  await page.getByRole('button',{name:'Use this API model',exact:true}).click();await page.waitForFunction(()=>!document.getElementById('agent-dialog').open);
@@ -143,5 +143,5 @@ test('manual connection controls include endpoints, reject cycles and keep reduc
  assert.equal(await page.locator('.connection').count(),0);await page.locator('#flow-list').click();
  for(const[source,target]of[['__input','B1'],['B1','B2'],['B2','B3'],['B3','__output']]){await page.getByLabel('Connection source',{exact:true}).selectOption(source);await page.getByLabel('Connection target',{exact:true}).selectOption(target);await page.getByRole('button',{name:'Add connection',exact:true}).click();}
  assert.equal(await page.locator('.connection').count(),4);await page.getByLabel('Connection source',{exact:true}).selectOption('B2');await page.getByLabel('Connection target',{exact:true}).selectOption('B1');await page.getByRole('button',{name:'Add connection',exact:true}).click();assert.equal(await page.locator('.connection').count(),4);
- await page.locator('#close-flow-list').click();await page.locator('#close-inspector').click();await page.locator('#fit').click();await screenshot(page,'manual-team-workflow.png');assert.deepEqual(x.errors,[]);await x.context.close();
+ await page.locator('#close-flow-list').click();await page.locator('#close-inspector').click();await page.keyboard.press('Escape');await page.locator('#fit').click();await screenshot(page,'manual-team-workflow.png');assert.deepEqual(x.errors,[]);await x.context.close();
 });
