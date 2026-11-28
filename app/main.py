@@ -282,6 +282,7 @@ def api_agent_catalog() -> dict[str, Any]:
 
 
 class APIConnectionBody(BaseModel):
+    provider: str = "custom"
     name: str = Field(min_length=1, max_length=80)
     protocol: str = "openai"
     base_url: str = Field(max_length=500)
@@ -289,6 +290,31 @@ class APIConnectionBody(BaseModel):
     api_key: str = Field(default="", max_length=4096, repr=False)
     context_budget: int = 16384
     output_budget: int = 2048
+
+
+class ModelDiscoveryBody(BaseModel):
+    provider: str
+    base_url: str = Field(default="", max_length=500)
+    protocol: str = "openai"
+    api_key: str = Field(default="", max_length=4096, repr=False)
+    connection_id: str | None = None
+
+
+@app.get("/api/api-model-providers")
+def api_api_model_providers():
+    from app.model_discovery import provider_presets
+    return provider_presets()
+
+
+@app.post("/api/api-models/discover")
+def api_discover_api_models(body: ModelDiscoveryBody):
+    from app.api_models import APIConnections, APIModelError
+    from app.model_discovery import discover
+    try:
+        result = discover(APIConnections(get_service().conn, WORKSPACE), body.model_dump())
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+    except APIModelError as exc:
+        return error_response(exc.code, exc.message)
 
 
 def _api_models_action(action, *args):

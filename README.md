@@ -18,7 +18,7 @@ This repository is published as a **work in progress**, not a finished release.
 | Frontend JavaScript | Implemented: API-backed composer, plan DAG, execution, delivery, agents and settings |
 | Live end-to-end mission | **Not verified**; prior orchestration tests are not evidence of a full MissionDeck mission |
 
-The default page opens Missions. Plans can be proposed by AI or built manually using connected task blocks. Before execution, steps, dependencies, agents, outputs and acceptance criteria can be edited and saved for approval. The read-only session monitor is at `/monitor.html`. Browser tests use isolated API fixtures; they are not evidence of a live Orca mission. Real Windows/Orca mission acceptance remains pending.
+The default browser page opens the specialist team canvas at `/teams.html`. API setup is available in the top bar: choose a service, load its model catalog and select a model without typing a model ID. A no-key shortcut checks free routes from the existing native OpenCode installation. See [API setup](docs/API_MODELS_FA.md). Plans can be proposed by AI or built manually using connected task blocks. Before execution, steps, dependencies, agents, outputs and acceptance criteria can be edited and saved for approval. The read-only session monitor is at `/monitor.html`. Browser tests use isolated API fixtures; they are not evidence of a live Orca mission. Real Windows/Orca mission acceptance remains pending.
 
 ## Requirements
 

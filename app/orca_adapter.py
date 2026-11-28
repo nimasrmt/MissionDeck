@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, Callable
@@ -21,6 +22,30 @@ class OrcaError(Exception):
 
 
 Runner = Callable[..., subprocess.CompletedProcess]
+
+
+def failure_guidance(op: str, stdout: str, stderr: str) -> dict[str, str]:
+    """Public recovery guidance without publishing native exception bodies."""
+    code = None
+    try:
+        data = json.loads(stdout)
+        error = data.get("error") or (data.get("result", {}).get("error") if isinstance(data.get("result"), dict) else None)
+        if isinstance(error, dict): code = error.get("code")
+    except (ValueError, AttributeError):
+        pass
+    known = {"selector_not_found", "worktree_not_found", "workspace_not_found", "runtime_unavailable", "runtime_not_running", "not_connected", "connection_refused", "unknown_option", "invalid_argument", "shell_not_found", "spawn_failed", "permission_denied", "incompatible_runtime"}
+    if not isinstance(code, str) or code not in known:
+        code = next((c for c in sorted(known) if re.search(r"(?<![A-Za-z_])" + c + r"(?![A-Za-z_])", stderr)), None)
+    result = {"native_code": code} if code else {}
+    if code in {"selector_not_found", "worktree_not_found", "workspace_not_found"}:
+        result["hint"] = "Open this MissionDeck workspace folder in the local Orca app, then retry. The same folder must be registered in that Orca runtime."
+    elif code in {"runtime_unavailable", "runtime_not_running", "not_connected", "connection_refused"}:
+        result["hint"] = "Open Orca and wait for its local runtime to connect, then retry."
+    elif code in {"shell_not_found", "spawn_failed", "permission_denied"}:
+        result["hint"] = "Check that a normal terminal opens in this workspace in Orca and that its configured shell is available."
+    elif op == "terminal_create":
+        result["hint"] = "Orca could not create the coordinator terminal. Open this workspace folder in Orca, check that a normal terminal opens, then retry. API settings can be configured independently."
+    return result
 
 
 class OrcaAdapter:
@@ -127,6 +152,7 @@ class OrcaAdapter:
                     "returncode": proc.returncode,
                     "stderr": stderr[:4000],
                     "truncated": truncated,
+                    **failure_guidance(op_name, stdout, stderr),
                 },
             )
         text = stdout.strip()
@@ -143,7 +169,7 @@ class OrcaAdapter:
         if not isinstance(data, dict):
             raise OrcaError("invalid_json", f"JSON root must be object for {op_name}", {"op": op_name})
         if data.get("ok") is False:
-            raise OrcaError("native_error", f"Orca rejected {op_name}", {"op": op_name})
+            raise OrcaError("native_error", f"Orca rejected {op_name}", {"op": op_name, **failure_guidance(op_name, stdout, stderr)})
         return data
 
     def _require_from(self, from_handle: str | None) -> str:
@@ -181,7 +207,7 @@ class OrcaAdapter:
                 "terminal",
                 "create",
                 "--worktree",
-                f"path:{self.workspace}",
+                f"path:{self.workspace.as_posix()}",
                 "--title",
                 title,
                 "--keep-open",
@@ -310,7 +336,7 @@ class OrcaAdapter:
             "--task",
             task_id,
             "--worktree",
-            f"path:{self.workspace}",
+            f"path:{self.workspace.as_posix()}",
             "--agent",
             agent,
         ]

@@ -23,6 +23,9 @@ async function setup(initial=mission()){
  if(p==='/api/session')return send({token:'council-csrf'});
  if(p==='/api/capabilities')return send({agents:agents(),worker_cap:2});
  if(p==='/api/agent-catalog')return send({agents:agents(),models:[...['opencode/free-one','opencode/free-two'].map(id=>({id,agent:'opencode',icon_key:'opencode',eligible:true})),...state.connections.map(r=>({id:r.route,name:r.name,agent:'opencode',icon_key:'opencode',source:'user_api',eligible:r.verified}))]});
+ if(p==='/api/api-model-providers')return send({providers:[{id:'groq',name:'Groq',base_url:'https://api.groq.com/openai/v1',protocol:'openai'}]});
+ if(p==='/api/api-models/discover')return send({models:[{id:'research/model-one',name:'Research One'},{id:'research/model-two',name:'Research Two'}],inference:false});
+ if(p==='/api/free-models/refresh')return send({models:[{id:'opencode/free-one'}],selected:state.pin});
  if(p==='/api/api-models/selection'){state.pin=body.model;return send({selected:state.pin});}
  if(p==='/api/api-models'){
    if(method==='POST'){const id='mdapi_1111111111111111',copy={...body};delete copy.api_key;state.connections=[{...copy,id,route:id+'/'+body.model,has_key:true,verified:false,status:'needs_test',price:null,quota:null}];}
@@ -123,17 +126,22 @@ test('new blocks have zero automatic wires; explicit drag, removal, undo and rel
 
 test('API form saves a write-only key without inference, tests explicitly, and selects the exact model for a council role',async()=>{
  const x=await setup(),{page,calls,state}=x;
- await page.locator('#api-models').click();await page.waitForFunction(()=>document.getElementById('api-dialog').open&&!document.getElementById('save-api-model').disabled);
+ await page.locator('#api-quick-add').click();await page.waitForFunction(()=>document.getElementById('api-dialog').open&&!document.getElementById('new-api-model').disabled);
  assert.equal(calls.filter(c=>c.method!=='GET').length,0);
- await page.locator('#api-form [name="name"]').fill('My private research model');await page.locator('#api-form [name="base_url"]').fill('https://api.provider.example/v1');await page.locator('#api-form [name="model"]').fill('research/model-one');await page.locator('#api-form [name="api_key"]').fill('test-only-key-never-returned');
+ await page.locator('#api-form [name="provider"]').selectOption('groq');
+ assert.equal(await page.locator('#api-form [name="base_url"]').inputValue(),'https://api.groq.com/openai/v1');
+ await page.locator('#api-form [name="name"]').fill('My private research model');await page.locator('#api-form [name="api_key"]').fill('test-only-key-never-returned');
+ await page.locator('#load-api-models').click();await page.waitForFunction(()=>document.querySelector('#api-form [name="model"]').options.length===3);
+ assert.equal(state.apiTests,0);assert.equal(state.connections.length,0);assert.equal(calls.filter(c=>c.p==='/api/api-models/discover').length,1);
+ await page.getByLabel('Search API models').fill('Research One');await page.getByLabel('API model',{exact:true}).selectOption('research/model-one');
+ assert.equal(await page.getByLabel('API model',{exact:true}).locator('option').count(),2);
  await page.locator('#save-api-model').click();await page.waitForFunction(()=>!document.getElementById('test-api-model').disabled);
  assert.equal(state.apiTests,0);assert.equal(await page.locator('#api-form [name="api_key"]').inputValue(),'');assert.doesNotMatch(await page.locator('#api-dialog').innerText(),/test-only-key-never-returned/);
- assert.match(await page.locator('#api-model-message').innerText(),/No model request/);
+ assert.match(await page.locator('#api-model-message').innerText(),/No generation request/);
  await page.locator('#test-api-model').click();await page.waitForFunction(()=>!document.getElementById('test-api-model').disabled);assert.equal(state.apiTests,1);
  assert.match(await page.locator('#api-connections').innerText(),/Tested/);await page.setViewportSize({width:1366,height:768});const resultBox=await page.locator('#api-model-message').boundingBox(),useBox=await page.locator('#use-api-model').boundingBox();assert.ok(resultBox.y+resultBox.height<=768,'API test result must fit the laptop viewport');assert.ok(useBox.y+useBox.height<=768,'API selection must fit the laptop viewport');await screenshot(page,'api-model-settings.png');
  await page.locator('#close-api-models').click();await page.locator('[data-kind="management"]').click();
- await page.getByRole('group',{name:'Council AI 1',exact:true}).getByRole('button',{name:'Browse AI images and models'}).click();await page.locator('#catalog-filter').selectOption('apis');
- await page.getByRole('button',{name:'Use this API model',exact:true}).click();await page.waitForFunction(()=>!document.getElementById('agent-dialog').open);
+ await page.getByRole('group',{name:'Council AI 1',exact:true}).getByLabel('Model',{exact:true}).selectOption('mdapi_1111111111111111/research/model-one');await page.waitForFunction(()=>!document.getElementById('refresh').disabled);
  assert.match(await page.getByRole('group',{name:'Council AI 1',exact:true}).innerText(),/mdapi_1111111111111111\/research\/model-one/);
  assert.equal(calls.filter(c=>c.p.endsWith('/manager/messages')||c.p.endsWith('/start')).length,0);assert.deepEqual(x.errors,[]);await x.context.close();
 });
@@ -144,4 +152,22 @@ test('manual connection controls include endpoints, reject cycles and keep reduc
  for(const[source,target]of[['__input','B1'],['B1','B2'],['B2','B3'],['B3','__output']]){await page.getByLabel('Connection source',{exact:true}).selectOption(source);await page.getByLabel('Connection target',{exact:true}).selectOption(target);await page.getByRole('button',{name:'Add connection',exact:true}).click();}
  assert.equal(await page.locator('.connection').count(),4);await page.getByLabel('Connection source',{exact:true}).selectOption('B2');await page.getByLabel('Connection target',{exact:true}).selectOption('B1');await page.getByRole('button',{name:'Add connection',exact:true}).click();assert.equal(await page.locator('.connection').count(),4);
  await page.locator('#close-flow-list').click();await page.locator('#close-inspector').click();await page.keyboard.press('Escape');await page.locator('#fit').click();await screenshot(page,'manual-team-workflow.png');assert.deepEqual(x.errors,[]);await x.context.close();
+});
+
+
+test('unknown service offers free model metadata without a key or worker launch',async()=>{
+ const x=await setup(),{page,calls}=x;
+ await page.locator('#api-quick-add').click();await page.waitForFunction(()=>document.getElementById('api-dialog').open&&!document.getElementById('new-api-model').disabled);
+ assert.equal(await page.locator('#save-api-model').isDisabled(),true);
+ await page.locator('#api-use-free').click();await page.waitForFunction(()=>document.getElementById('provider-dialog').open);
+ assert.match(await page.locator('#model-list').innerText(),/opencode\/free-one/);
+ assert.deepEqual(calls.filter(c=>c.method!=='GET').map(c=>c.p),['/api/free-models/refresh']);
+ assert.deepEqual(x.errors,[]);await x.context.close();
+});
+
+test('API connection load errors remain visible in the open dialog',async()=>{
+ const x=await setup(),{page}=x;
+ await page.route('**/api/api-model-providers',r=>r.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:{message:'Service list unavailable'}})}));
+ await page.locator('#api-quick-add').click();await page.waitForFunction(()=>document.getElementById('api-model-message').textContent.includes('Service list unavailable'));
+ assert.equal(await page.locator('#api-dialog').evaluate(n=>n.open),true);assert.deepEqual(x.errors,[]);await x.context.close();
 });

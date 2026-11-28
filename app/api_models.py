@@ -215,13 +215,15 @@ class APIConnections:
         items = []
         for r in self._rows():
             ok = self._matches(r)
-            items.append({k: r.get(k) for k in ("id", "name", "protocol", "base_url", "model", "context_budget", "output_budget", "checked_at", "last_error")} | {
+            items.append({k: r.get(k) for k in ("id", "name", "provider", "protocol", "base_url", "model", "context_budget", "output_budget", "checked_at", "last_error")} | {
                 "route": r["id"] + "/" + r["model"], "agent": "opencode", "has_key": (self.private / r["key_file"]).is_file(),
                 "verified": ok, "status": "enabled" if ok else "needs_test", "billing": "user_supplied_api", "quota": None, "price": None,
             })
         return {"connections": items, "protocols": ["openai", "anthropic"], "inference": False}
 
     def save(self, body, connection_id=None):
+        from app.model_discovery import normalize_provider
+        body = normalize_provider(body)
         rows = self._rows()
         old = next((r for r in rows if r["id"] == connection_id), None)
         if connection_id and old is None: raise APIModelError("not_found", "API connection not found")
@@ -240,7 +242,7 @@ class APIConnections:
         if type(context) is not int or type(output) is not int or not 1024 <= context <= 1000000 or not 128 <= output <= min(context, 32768):
             raise APIModelError("validation", "Use a context budget of 1024..1000000 and an output budget of 128..32768, within context")
         cid = old["id"] if old else "mdapi_" + uuid.uuid4().hex[:16]
-        row = {"id": cid, "name": name.strip(), "protocol": body["protocol"], "base_url": base, "model": model,
+        row = {"id": cid, "name": name.strip(), "provider": body["provider"], "protocol": body["protocol"], "base_url": base, "model": model,
                "context_budget": context, "output_budget": output, "verified": False, "checked_at": None, "last_error": None,
                "key_file": old["key_file"] if old and not key else cid + "-" + uuid.uuid4().hex[:16] + ".key"}
         row["key_sha256"] = hashlib.sha256(key.encode()).hexdigest() if key else old.get("key_sha256")
