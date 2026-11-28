@@ -13,6 +13,8 @@ secrets/
 
 # --- MissionDeck runtime state ---
 .orca-runs/
+# Generated local OpenCode bridge for user API models; never publish.
+.opencode/opencode.json
 *.db
 *.db-wal
 *.db-shm

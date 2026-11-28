@@ -157,3 +157,13 @@ Free model setup can inspect the installed OpenCode catalog and pin a verified z
 The team canvas now supports peer-AI management councils (no supervisor/staff), persistent manager chat, an optional separate read-only inspector, and explicit input/final-delivery endpoints. Use **AI & agent library** for local images, eligibility and model selection; blocked routes stay visible but cannot launch. Sending a message consults the council only. **Use proposed workflow** saves a versioned draft for separate approval and execution.
 
 Data-flow motion means a saved native task is processing declared upstream inputs, not measured byte traffic. Click a connection to inspect recorded files, size and hash. All consultation and execution actors share the two-session cap. Local image provenance and licenses: [sources](docs/AGENT_IMAGE_SOURCES.md). [Persian guide](docs/TEAM_CANVAS_FA.md).
+
+## Manual connections and your API models
+
+New canvases use workflow version 3 with explicit `connections: [{source, target}]`. Adding any team creates no wires. Drag an output to an input, select the ports with clicks, or use **Connections & data** to add, inspect and remove routes. Input and final delivery are wired by the user too. All blocks must be on a path from `__input` to `__output` before a workflow can be saved for approval. Removing a wire never invents another. Existing version-1/2 missions still execute with their saved plans.
+
+**API & my models** stores a user's existing OpenAI-compatible Chat Completions or Anthropic Messages connection. Saving is local only; **Test & enable** explicitly sends one bounded tool-call test and verifies the exact route in OpenCode's project catalog. An enabled API model can be assigned to a council member, supervisor, employee or inspector. Native Orca/OpenCode remains the executor; the app does not create a parallel API worker engine. The user's chosen API is an explicit exception to the free-catalog policy, with unknown cost/quota and no fallback. No subscription or package is installed.
+
+Keys are write-only in the settings API and stored as local plaintext private files, not encrypted vault entries. `.orca-runs/private/apis/` and the generated `.opencode/opencode.json` are ignored by Git; native configuration contains file references, not embedded keys. Other native settings are preserved and external edits to a managed provider are not overwritten. API edits/tests are blocked while workers are active. See [API setup and limits](docs/API_MODELS_FA.md).
+
+The visual reference set and accepted design direction are recorded in [VIDEO_REFERENCES_FA.md](docs/VIDEO_REFERENCES_FA.md). Department colors and port highlights stay restrained; motion reflects saved execution state and respects reduced motion.

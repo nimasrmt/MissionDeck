@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased - manual team wiring and user APIs
+
+- Make version-3 canvas links fully explicit, including input, final delivery and inspection. Add drag previews, connection controls, removal, undo and disconnected-path validation; never auto-connect a newly added block.
+- Add write-only local API model settings for OpenAI-compatible and Anthropic Messages endpoints, explicit tool-call tests, native OpenCode 1/2 provider configuration and exact model selection for existing native Orca jobs. Preserve unknown billing/quota, two-session capacity and no fallback.
+- Keep the six video references as a documented design direction; add restrained department colors, clearer ports and truthful flow highlights with reduced-motion support.
+- Protect private API paths, remove rejected key inputs from validation responses and preserve unrelated native configuration.
+
 ## Unreleased - mission UI restoration
 
 - Parse native account usage from `result.rateLimits`; recognize reported Cursor free/ok evidence while retaining unknown quota blocks for Codex and error blocks for Grok.

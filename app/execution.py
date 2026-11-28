@@ -392,6 +392,21 @@ class MissionService:
             reason = "pinned zero-price tool-capable route; quota unknown" if eligible else "free model route unverified; dispatch blocked"
             model = pinned if route else "unknown"
             if route: evidence.extend(["source=OpenCode model catalog", "input_price=0", "output_price=0", "tool_call=true"])
+            from app.api_models import APIConnections
+            custom = APIConnections(self.conn, WORKSPACE).routes()
+            enabled = {r["id"] for r in custom if r["eligible"]}
+            user_pin = get_setting(self.conn, "user_api_pin")
+            if enabled:
+                eligible = installed
+                if not route:
+                    reason = "Choose an enabled API model; its cost and quota are unknown"
+                    billing = "user_supplied_api"
+            if user_pin:
+                model = user_pin if user_pin in enabled else "unknown"
+                eligible = installed and user_pin in enabled
+                billing = "user_supplied_api"
+                reason = "Your explicitly selected API; cost and quota unknown" if eligible else "Selected API needs a new test; no fallback"
+                evidence = ["source=user API settings", "price=unknown", "quota=unknown"]
         elif agent_id == "codex":
             billing = "quota"
             source = acct or info
@@ -441,22 +456,31 @@ class MissionService:
         if not selected_route(catalog, model):
             raise AppError("model_unverified", "Refresh the free catalog and choose a verified route")
         set_setting(self.conn, "free_model_pin", model)
+        set_setting(self.conn, "user_api_pin", "")
         add_audit(self.conn, "select_free_model", {"model": model})
         self.conn.commit()
         return {**catalog, "selected": model}
 
     def require_eligible(self, agent: str, model: str | None = None) -> str | None:
         """Check current evidence before any worker dispatch, never a UI cache."""
-        if agent == "opencode":
+        requested = model if model not in (None, "", "unknown") else get_setting(self.conn, "user_api_pin")
+        custom = agent == "opencode" and isinstance(requested, str) and requested.startswith("mdapi_")
+        if agent == "opencode" and not custom:
             self.refresh_free_models()
         capabilities = self.capabilities()
         if not capabilities["orca"]["available"]:
             raise AppError("orca_unavailable", "Orca did not report a ready, connected runtime")
         row = next((a for a in capabilities["agents"] if a["id"] == agent), None)
-        if not row or not row["eligible"]:
+        if not row or (not row["eligible"] and not (agent == "opencode" and row.get("installed"))):
             raise AppError("agent_ineligible", f"Agent {agent} is not currently eligible",
                            {"reason": row["reason"] if row else "agent not reported"})
         if agent == "opencode":
+            if custom:
+                from app.api_models import APIConnections, APIModelError
+                try:
+                    return APIConnections(self.conn, WORKSPACE).require(requested)
+                except APIModelError as exc:
+                    raise AppError(exc.code, exc.message) from exc
             selected = model if model not in (None, "", "unknown") else row["model"]
             catalog = loads(get_setting(self.conn, "free_model_catalog"), {})
             if not selected_route(catalog, selected):
@@ -793,7 +817,7 @@ class MissionService:
                 if "team_workflow" in plan:
                     from copy import deepcopy
                     plan = deepcopy(plan)
-                    pin = get_setting(self.conn, "free_model_pin")
+                    pin = get_setting(self.conn, "user_api_pin") or get_setting(self.conn, "free_model_pin")
                     source = plan["team_workflow"]
                     source_blocks = source.get("blocks", []) if isinstance(source, dict) else []
                     for block in source_blocks if isinstance(source_blocks, list) else []:

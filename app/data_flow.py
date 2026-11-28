@@ -25,18 +25,25 @@ def project_flow(mission):
                           'sha256':a.get('sha256') if a else None,'artifact_id':a.get('id') if a else None})
         edges.append({'source':src,'target':dst,'files':files,'text':text,'source_state':source_state,'target_state':target_state,
                       'state':'processing_inputs' if active else 'failed' if source_state in ('failed','unknown','blocked') else 'completed' if target_state=='succeeded' else 'available' if source_state in ('available','succeeded') else 'waiting'})
+    manual=workflow.get('version')==3
     for b in blocks:
-        if not b.get('deps'):
+        if (manual and b['id'] in (workflow.get('input') or {}).get('targets',[])) or (not manual and not b.get('deps')):
             edge('__input',b['id'],(workflow.get('input') or {}).get('files',[]),(workflow.get('input') or {}).get('text') or mission.get('objective'))
         for dep in b.get('deps',[]):
             inputs={p for t in tasks if t.get('team_block')==b['id'] for p in t.get('inputs',[])}
             edge(dep,b['id'],outputs.get(dep,set()) & inputs)
-    if workflow.get('version')==2:
+    if workflow.get('version') in (2,3):
         delivery=workflow.get('delivery') or {};sources=delivery.get('sources') or []
     else:
         sources=[b['id'] for b in blocks if not any(b['id'] in other.get('deps',[]) for other in blocks)]
-    for src in sources:edge(src,'__output',outputs.get(src,set()))
+    direct={e['source'] for e in workflow.get('connections',[]) if e.get('target')=='__output'} if manual else set(sources)
+    for src in sources:
+        if src in direct:edge(src,'__output',outputs.get(src,set()))
     inspector=(workflow.get('delivery') or {}).get('inspector')
-    if inspector and inspector not in sources:edge(inspector,'__output',outputs.get(inspector,set()))
+    if inspector and inspector not in sources:
+        delivered=set(outputs.get(inspector,set()))
+        if manual:
+            for src in sources:delivered.update(outputs.get(src,set()))
+        edge(inspector,'__output',delivered)
     return {'edges':edges,'checked_at':mission.get('native_checked_at') or mission.get('updated_at') or mission.get('freshness'),
             'telemetry':'Declared file contracts and saved native task states; movement means processing inputs, not measured byte traffic.'}

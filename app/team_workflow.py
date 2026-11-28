@@ -122,12 +122,14 @@ Files: {mission['scope']}
 Constraints: {mission['constraints']}
 Available routes (use ONLY these exact agent/model pairs): {json.dumps(allowed)}
 
-team_workflow has version 2 and blocks (1..8). Include management, the useful specialties,
+team_workflow has version 3, connections, and blocks (1..8). Include management, the useful specialties,
 and a final inspection block. Each block has:
 - id: unique short letter-led ID
 - name, specialty, goal: clear nonempty strings
 - kind: management, specialist, or inspection
-- deps: IDs of prerequisite blocks, no cycles; inspection waits for all implementation blocks
+- Connections are explicit objects with source and target IDs. Input is __input and final delivery is __output.
+- No connection is inferred. Every block must lie on a connected path from __input to __output.
+- No cycles. Final inspection connects to __output. deps are derived from connections, not authoritative.
 - For specialist blocks only: supervisor: {{"agent": "eligible agent ID", "model": "verified model ID or unknown"}}
 - For management: advisors: 1..4 objects with agent and model. These are consulting peers,
   with no supervisor or employees. They produce advice, then a synthesis session publishes the manager brief.
@@ -139,8 +141,9 @@ Use few employees for this test. Give each employee a distinct, small assignment
 file. No shared writes between concurrent jobs. The independent inspector reads upstream
 outputs and writes a scoped PASS/FAIL report; it must not rewrite producer deliverables.
 At the top of team_workflow include input: {{"text": "mission input", "files": []}},
-and delivery: {{"sources": ["final producer block IDs"], "inspector": "inspection block ID or null"}}.
-The inspector must transitively depend on all delivery sources. Select final producer blocks, not the inspector, as sources.
+and connections: [{{"source":"__input","target":"manager block ID"}}, ...].
+Connect producer blocks to inspection, then inspection to __output when an inspector is used.
+These are a PROPOSAL only: the user must explicitly apply, review and approve it. Never modify existing connections yourself.
 Do not include task arrays or invent progress. MissionDeck compiles a supervisor brief, employee
 jobs and a supervisor PASS/FAIL gate for each block. At most two native sessions run at once.
 Do not launch any worker. No network, installs or spending for implementation unless the mission
@@ -154,6 +157,9 @@ python -m pytest <relative_path> -q.
 
 def compile_team_workflow(workflow: Any, mission_id: str, objective: str,
                           eligible_agents: set[str] | None = None) -> dict[str, Any]:
+    if isinstance(workflow, dict) and workflow.get("version") == 3:
+        from app.team_wiring import compile_v3
+        return compile_v3(workflow, mission_id, objective, eligible_agents)
     if isinstance(workflow, dict) and workflow.get("version") == 2:
         from app.team_workflow_v2 import compile_v2
         return compile_v2(workflow, mission_id, objective, eligible_agents)

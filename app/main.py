@@ -82,12 +82,27 @@ def error_response(code: str, message: str, details: dict | None = None, status:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     init_db(_db_path)
+    from app.api_models import APIConnections
+    APIConnections(get_conn(_db_path), WORKSPACE).public()
     # Startup must not create terminals, re-bind runs, or dispatch workers.
     # Existing mission state is a persisted snapshot until explicit reconciliation.
     yield
 
 
 app = FastAPI(title="MissionDeck", version=APP_VERSION, lifespan=lifespan)
+
+
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
+
+
+@app.exception_handler(RequestValidationError)
+async def safe_api_validation(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith("/api/api-models"):
+        # Pydantic's default response contains the rejected input, including a
+        # write-only API key. Return field names only for this private form.
+        return error_response("validation", "Invalid API settings", {"fields": [list(e["loc"]) for e in exc.errors()]}, 422)
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.middleware("http")
@@ -259,7 +274,78 @@ def api_agent_catalog() -> dict[str, Any]:
     from app.agent_catalog import catalogue
     from app.db import loads
     service = get_service()
-    return catalogue(api_capabilities(), loads(get_setting(service.conn, "free_model_catalog"), {}))
+    data = catalogue(api_capabilities(), loads(get_setting(service.conn, "free_model_catalog"), {}))
+    from app.api_models import APIConnections
+    installed = any(a["id"] == "opencode" and a["installed"] for a in data["agents"])
+    data["models"] += [{**r, "eligible": r["eligible"] and installed} for r in APIConnections(service.conn, WORKSPACE).routes()]
+    return data
+
+
+class APIConnectionBody(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    protocol: str = "openai"
+    base_url: str = Field(max_length=500)
+    model: str = Field(max_length=160)
+    api_key: str = Field(default="", max_length=4096, repr=False)
+    context_budget: int = 16384
+    output_budget: int = 2048
+
+
+def _api_models_action(action, *args):
+    from app.api_models import APIConnections, APIModelError
+    from app.execution import MissionStartLock
+    service = get_service()
+    try:
+        with MissionStartLock():
+            if service.count_active_dispatches():
+                raise AppError("busy", "Finish or stop active workers before changing or testing an API connection")
+            data = getattr(APIConnections(service.conn, WORKSPACE), action)(*args)
+            _capabilities_cache.update(data=None, at=0)
+            return JSONResponse(data, headers={"Cache-Control": "no-store"})
+    except (AppError, APIModelError) as exc:
+        return error_response(exc.code, exc.message)
+
+
+@app.get("/api/api-models")
+def api_api_models():
+    from app.api_models import APIConnections, APIModelError
+    try:
+        return JSONResponse(APIConnections(get_service().conn, WORKSPACE).public(), headers={"Cache-Control": "no-store"})
+    except APIModelError as exc:
+        return error_response(exc.code, exc.message)
+
+
+@app.post("/api/api-models")
+def api_add_api_model(body: APIConnectionBody):
+    return _api_models_action("save", body.model_dump())
+
+
+@app.put("/api/api-models/selection")
+def api_pin_api_model(body: FreeModelBody):
+    from app.api_models import APIConnections
+    service = get_service()
+    if not any(r["id"] == body.model and r["eligible"] for r in APIConnections(service.conn, WORKSPACE).routes()):
+        return error_response("model_unverified", "Test this exact API model first")
+    set_setting(service.conn, "user_api_pin", body.model)
+    add_audit(service.conn, "select_user_api", {"model": body.model})
+    service.conn.commit()
+    _capabilities_cache.update(data=None, at=0)
+    return {"selected": body.model}
+
+
+@app.put("/api/api-models/{connection_id}")
+def api_edit_api_model(connection_id: str, body: APIConnectionBody):
+    return _api_models_action("save", body.model_dump(), connection_id)
+
+
+@app.post("/api/api-models/{connection_id}/test")
+def api_test_api_model(connection_id: str):
+    return _api_models_action("probe", connection_id)
+
+
+@app.delete("/api/api-models/{connection_id}")
+def api_delete_api_model(connection_id: str):
+    return _api_models_action("delete", connection_id)
 
 
 class ManagerMessageBody(BaseModel):

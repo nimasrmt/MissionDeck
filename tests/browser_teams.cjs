@@ -38,13 +38,16 @@ test('build specialist blocks, choose employee count, connect dependencies, reje
  await page.locator('[data-kind="inspection"]').click();
  await page.getByRole('button',{name:'Close settings'}).click();await page.getByRole('button',{name:'Fit',exact:true}).click();
  assert.equal(await page.locator('.team-node').count(),3);assert.equal(await page.locator('.satellite.supervisor').count(),1);assert.equal(await page.locator('.satellite.employee').count(),2);assert.equal(await page.locator('.satellite.council-member').count(),1);assert.equal(await page.locator('.satellite.independent-inspector').count(),1);
+ assert.equal(await page.locator('.connection').count(),0);
+ await page.getByRole('button',{name:'Output Mission input',exact:true}).click();await page.getByRole('button',{name:'Input Management',exact:true}).click();
  await page.getByRole('button',{name:'Output Management',exact:true}).click();await page.getByRole('button',{name:'Input Specialist team',exact:true}).click();
  await page.getByRole('button',{name:'Output Specialist team',exact:true}).click();await page.getByRole('button',{name:'Input Inspection',exact:true}).click();
- assert.equal(await page.locator('.block-connection').count(),3);
+ assert.equal(await page.locator('.block-connection').count(),2);
  await page.getByRole('button',{name:'Output Inspection',exact:true}).click();await page.getByRole('button',{name:'Input Management',exact:true}).click();
- assert.match(await page.locator('#notice').innerText(),/cycle/);assert.equal(await page.locator('.block-connection').count(),3);
+ assert.match(await page.locator('#notice').innerText(),/cycle/);assert.equal(await page.locator('.block-connection').count(),2);
+ await page.getByRole('button',{name:'Output Inspection',exact:true}).click();await page.getByRole('button',{name:'Input Final delivery',exact:true}).click();
  await page.getByRole('button',{name:'Save workflow',exact:true}).click();await page.waitForFunction(()=>document.getElementById('mission-status').textContent==='awaiting_approval');
- const save=calls.find(c=>c.p.endsWith('/team-workflow'));assert.equal(save.method,'PUT');assert.equal(save.token,'team-token');assert.equal(save.body.plan.blocks[1].employees.length,2);assert.ok(save.body.plan.blocks[2].deps.includes('B2'));assert.equal(save.body.plan.version,2);assert.equal(save.body.plan.blocks[0].supervisor,undefined);
+ const save=calls.find(c=>c.p.endsWith('/team-workflow'));assert.equal(save.method,'PUT');assert.equal(save.token,'team-token');assert.equal(save.body.plan.blocks[1].employees.length,2);assert.ok(save.body.plan.blocks[2].deps.includes('B2'));assert.equal(save.body.plan.version,3);assert.equal(save.body.plan.blocks[0].supervisor,undefined);
  assert.equal(calls.filter(c=>c.method==='POST').length,0);assert.deepEqual(x.errors,[]);await page.getByRole('button',{name:'Fit',exact:true}).click();await screenshot(page,'team-canvas.png');await x.context.close();
 });
 
@@ -57,7 +60,7 @@ test('root opens team canvas; provider setup only discovers and pins a free rout
 });
 
 test('version conflict preserves the canvas and execution locks settings',async()=>{
- const x=await setup(),{page,state}=x;await page.locator('[data-kind="specialist"]').click();state.conflict=true;await page.getByRole('button',{name:'Save workflow',exact:true}).click();await page.waitForFunction(()=>!document.getElementById('refresh').disabled);assert.match(await page.locator('#notice').innerText(),/changed/);assert.equal(await page.locator('.team-node').count(),1);assert.match(await page.locator('#saved-state').innerText(),/Unsaved/);assert.deepEqual(x.errors,[]);await x.context.close();
+ const x=await setup(),{page,state}=x;await page.locator('[data-kind="specialist"]').click();await page.getByRole('button',{name:'Close settings'}).click();await page.locator('#fit').click();await page.getByRole('button',{name:'Output Mission input',exact:true}).click();await page.getByRole('button',{name:'Input Specialist team',exact:true}).click();await page.getByRole('button',{name:'Output Specialist team',exact:true}).click();await page.getByRole('button',{name:'Input Final delivery',exact:true}).click();state.conflict=true;await page.getByRole('button',{name:'Save workflow',exact:true}).click();await page.waitForFunction(()=>!document.getElementById('refresh').disabled);assert.match(await page.locator('#notice').innerText(),/changed/);assert.equal(await page.locator('.team-node').count(),1);assert.match(await page.locator('#saved-state').innerText(),/Unsaved/);assert.deepEqual(x.errors,[]);await x.context.close();
  const live=mission({status:'running',active_dispatches:1,plan:{team_workflow:workflow(),tasks:[]},tasks:[{plan_task_id:'B1_brief',status:'running'}],can:{save_plan:false,plan:false,cancel:true}});
  live.plan.tasks=[{id:'B1_brief',team_block:'B1'}];
  const y=await setup(live);await y.page.getByRole('button',{name:'Configure Management',exact:true}).click();assert.equal(await y.page.getByLabel('Specialty',{exact:true}).isDisabled(),true);assert.equal(await y.page.locator('.team-node.running').count(),1);assert.equal(y.calls.filter(c=>c.method!=='GET').length,0);await screenshot(y.page,'team-execution.png');assert.deepEqual(y.errors,[]);await y.context.close();
@@ -74,6 +77,7 @@ test('saving a canvas before mission creation preserves every configured block',
  const x=await setup(null),{page,calls}=x;
  await page.locator('[data-kind="management"]').click();
  await page.getByRole('button',{name:'Close settings'}).click();
+ await page.locator('#fit').click();await page.getByRole('button',{name:'Output Mission input',exact:true}).click();await page.getByRole('button',{name:'Input Management',exact:true}).click();await page.getByRole('button',{name:'Output Management',exact:true}).click();await page.getByRole('button',{name:'Input Final delivery',exact:true}).click();
  await page.locator('#objective').fill('Preserve the configured team');
  await page.getByRole('button',{name:'Save workflow',exact:true}).click();
  await page.locator('#create-form input[name="title"]').fill('New team draft');

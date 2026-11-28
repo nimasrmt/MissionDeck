@@ -94,7 +94,10 @@ def compile_v2(workflow, mid, objective, eligible):
                 'review_required':False,'team_block':b['id'],'specialty':b['specialty'],'instruction':instruction}
     for b in blocks:
         bid=b['id'];root=f'.orca-runs/{mid}/teams/{bid}'
-        upstream=[p for dep in b['deps'] for p in outputs[dep]] or files
+        upstream=[p for dep in b['deps'] for p in outputs[dep]]
+        if source.get('wiring')=='manual':
+            if bid in inlet.get('targets',[]): upstream=list(dict.fromkeys(upstream+files))
+        else: upstream=upstream or files
         terminal_deps=[f'{d}_check' for d in b['deps']]
         goal=f"Mission: {objective}. Input: {inlet.get('text',objective)}. Specialty: {b['specialty']}. Goal: {b['goal']}. "
         if b['kind']=='management':

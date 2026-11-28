@@ -22,6 +22,13 @@ REDACTION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{64,}(?![0-9a-fA-F])"), "[REDACTED_HEX]"),
 ]
 
+_PRIVATE_SECRETS: set[str] = set()
+
+
+def register_secret(value: str) -> None:
+    if value:
+        _PRIVATE_SECRETS.add(value)
+
 
 class SecurityError(Exception):
     def __init__(self, code: str, message: str, details: dict | None = None) -> None:
@@ -58,6 +65,8 @@ def redact(text: str) -> str:
     if not text:
         return text
     out = text
+    for secret in tuple(_PRIVATE_SECRETS):
+        out = out.replace(secret, "[REDACTED_API_KEY]")
     for pattern, replacement in REDACTION_PATTERNS:
         out = pattern.sub(replacement, out)
     return out
@@ -95,6 +104,9 @@ def resolve_under_workspace(
         raise SecurityError("bad_path", "Path traversal is not allowed", {"path": rel_or_path})
     if any(p == ".git" or p.endswith(".git") for p in parts):
         raise SecurityError("bad_path", ".git paths are not allowed", {"path": rel_or_path})
+    lower = [p.casefold() for p in parts]
+    if lower[:2] == [".orca-runs", "private"] or lower[:2] == [".opencode", "opencode.json"]:
+        raise SecurityError("bad_path", "Private API configuration is not a task input, output or artifact")
     candidate = (root / raw).resolve()
     try:
         candidate.relative_to(root)

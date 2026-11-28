@@ -84,9 +84,9 @@ def send(service, mid, *, message, advisors, block_id, request_id, workflow=None
                               'Do not change the project, run other models or start workers. State disagreements and concrete next steps. Write only your declared advice file.', 'manager_advice'))
         available=[{'agent':a['id'],'model':a['model']} for a in service.capabilities()['agents'] if a.get('eligible')]
         available += [a for a in routes if a not in available]
-        schema=("An optional team_workflow uses version 2, input:{text,files:[]}, delivery:{sources:[producer block IDs],inspector:inspection block ID or null}, blocks:1..8 objects with id,name,specialty,goal,kind,deps. "
+        schema=("An optional team_workflow uses version 3, input:{text,files:[]}, connections:[{source,target}], blocks:1..8 objects with id,name,specialty,goal,kind. Connections are explicit: __input leads through the teams to __output; every block must lie on that path. deps are derived. Final inspection connects to __output. "
                 "management has advisors:1..4 {agent,model} and NO supervisor/employees; specialist has supervisor:{agent,model}, employees:1..8 {agent,model,instruction,outputs:[relative file],acceptance:[criterion]}; "
-                "inspection has inspector:{agent,model} and NO supervisor/employees. The inspector depends on all final sources. No cycles or conflicting writes.")
+                "inspection has inspector:{agent,model} and NO supervisor/employees. The inspector receives all final producers through explicit connections. No cycles or conflicting writes. Only propose wiring; it is applied only after the user explicitly chooses the proposal.")
         instruction=base+'Read every advice file. Address the user conversationally in their language, summarize decisions and differences, and ask a concise question when the goal is ambiguous. '+\
                     'Write exactly the declared JSON reply file with reply:string (user-facing final answer), dispatch_id:YOUR current native dispatch ID, and optionally team_workflow:object when a concrete executable workflow is useful. '+\
                     'Never claim work was implemented or accepted. Proposals are not automatically applied, approved or executed. '+schema+\
@@ -149,7 +149,7 @@ def apply_proposal(service,mid,turn_id,version):
     row=service.conn.execute('SELECT * FROM manager_turns WHERE id=? AND parent_mission_id=?',(turn_id,mid)).fetchone()
     if not row or row['status']!='ready':raise AppError('invalid_state','A verified manager reply is required')
     proposal=loads(row['reply_data_json'],{}).get('team_workflow')
-    if not isinstance(proposal,dict) or proposal.get('version')!=2:raise AppError('validation','This reply needs a version 2 council workflow proposal')
+    if not isinstance(proposal,dict) or proposal.get('version') not in (2,3):raise AppError('validation','This reply needs a version 2 or 3 council workflow proposal')
     return service.save_plan(mid,{'team_workflow':proposal},version)
 
 

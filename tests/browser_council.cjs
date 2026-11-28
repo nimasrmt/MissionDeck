@@ -13,7 +13,7 @@ function workflow(){return {version:2,input:{text:'یک خروجی قابل بر
 function mission(extra={}){return {id:'mis_council',title:'تیم پژوهش و توسعه',objective:'Deliver a checked report',status:'draft',plan:null,plan_version:0,tasks:[],artifacts:[],active_dispatches:0,global_active_dispatches:0,can:{save_plan:true,plan:true,approve:false,start:false,cancel:false},...extra};}
 async function setup(initial=mission()){
  const context=await browser.newContext({viewport:{width:1440,height:900}}),page=await context.newPage(),calls=[],errors=[];
- const state={mission:initial,turns:[],pin:'opencode/free-one'};page.on('pageerror',e=>errors.push(e.message));
+ const state={mission:initial,turns:[],pin:'opencode/free-one',connections:[],apiTests:0};page.on('pageerror',e=>errors.push(e.message));
  const agents=()=>[{id:'cursor',name:'Cursor',icon_key:'cursor',installed:true,eligible:true,model:'unknown',billing:'included_plan',quota:null,reason:'Free included plan'},
  {id:'opencode',name:'OpenCode',icon_key:'opencode',installed:true,eligible:true,model:state.pin,billing:'free_models',quota:null,reason:'Verified free model'},
  {id:'claude',name:'Claude',icon_key:'claude',installed:true,eligible:false,model:'unknown',billing:'api_key_metered',quota:null,reason:'Paid route blocked'},
@@ -22,7 +22,15 @@ async function setup(initial=mission()){
  await page.route('**/api/**',async route=>{const req=route.request(),p=new URL(req.url()).pathname,method=req.method(),body=req.postDataJSON();calls.push({p,method,body,token:req.headers()['x-cc-token']});const send=(d,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(d)});
  if(p==='/api/session')return send({token:'council-csrf'});
  if(p==='/api/capabilities')return send({agents:agents(),worker_cap:2});
- if(p==='/api/agent-catalog')return send({agents:agents(),models:['opencode/free-one','opencode/free-two'].map(id=>({id,agent:'opencode',icon_key:'opencode',eligible:true}))});
+ if(p==='/api/agent-catalog')return send({agents:agents(),models:[...['opencode/free-one','opencode/free-two'].map(id=>({id,agent:'opencode',icon_key:'opencode',eligible:true})),...state.connections.map(r=>({id:r.route,name:r.name,agent:'opencode',icon_key:'opencode',source:'user_api',eligible:r.verified}))]});
+ if(p==='/api/api-models/selection'){state.pin=body.model;return send({selected:state.pin});}
+ if(p==='/api/api-models'){
+   if(method==='POST'){const id='mdapi_1111111111111111',copy={...body};delete copy.api_key;state.connections=[{...copy,id,route:id+'/'+body.model,has_key:true,verified:false,status:'needs_test',price:null,quota:null}];}
+   return send({connections:state.connections});
+ }
+ if(p==='/api/api-models/mdapi_1111111111111111/test'){state.apiTests++;state.connections[0].verified=true;state.connections[0].status='enabled';return send({connections:state.connections});}
+ if(p==='/api/api-models/mdapi_1111111111111111'&&method==='DELETE'){state.connections=[];return send({connections:[]});}
+ if(p==='/api/missions/mis_council/team-workflow'){state.mission=mission({plan:{team_workflow:body.plan,tasks:[]},plan_version:state.mission.plan_version+1,status:'awaiting_approval',can:{save_plan:true,approve:true,plan:false,start:false,cancel:false}});return send(state.mission);}
  if(p==='/api/free-models/selection'){state.pin=body.model;return send({selected:state.pin});}
  if(p==='/api/missions'){if(method==='POST'){state.mission=mission({title:body.title,objective:body.objective});return send(state.mission);}return send({missions:state.mission?[state.mission]:[]});}
  if(p==='/api/missions/mis_council')return send(state.mission);
@@ -70,7 +78,7 @@ test('manager chat persists a Persian message, returns a verified reply and appl
  await page.locator('#manager-message').fill('برای ساختن گزارش با دو AI مشورت کن');await page.locator('#manager-message').press('Enter');
  await page.waitForFunction(()=>!document.getElementById('refresh').disabled);
  assert.match(await page.locator('#chat-history').innerText(),/برای ساختن گزارش/);
- const sent=calls.find(c=>c.p.endsWith('/manager/messages'));assert.equal(sent.token,'council-csrf');assert.equal(sent.body.workflow.version,2);assert.ok(sent.body.request_id);
+ const sent=calls.find(c=>c.p.endsWith('/manager/messages'));assert.equal(sent.token,'council-csrf');assert.equal(sent.body.workflow.version,3);assert.ok(sent.body.request_id);
  await page.locator('#check-replies').click();await page.waitForFunction(()=>!document.getElementById('refresh').disabled);
  assert.match(await page.locator('#chat-history').innerText(),/برنامه آماده/);
  await screenshot(page,'manager-council.png');
@@ -91,4 +99,49 @@ test('input, final delivery, independent inspector and saved-file flow are direc
  assert.match(await page.locator('#inspector-body').innerText(),/manager\.md/);assert.match(await page.locator('#inspector-body').innerText(),/SHA-256 abc123/);
  await page.emulateMedia({reducedMotion:'reduce'});assert.equal(await page.locator('.flow-active').evaluate(n=>getComputedStyle(n).animationName),'none');
  assert.equal(calls.filter(c=>c.method!=='GET').length,0);await screenshot(page,'data-handoffs.png');assert.deepEqual(x.errors,[]);await x.context.close();
+});
+
+
+test('new blocks have zero automatic wires; explicit drag, removal, undo and reload preserve only user links',async()=>{
+ const x=await setup(),{page,calls,state}=x;
+ await page.locator('[data-kind="specialist"]').click();await page.locator('#close-inspector').click();await page.locator('#fit').click();
+ assert.equal(await page.locator('.connection').count(),0);
+ await page.locator('#save').click();await page.waitForFunction(()=>!document.getElementById('refresh').disabled);
+ assert.match(await page.locator('#notice').innerText(),/connect a path/);assert.equal(calls.filter(c=>c.p.endsWith('/team-workflow')).length,0);
+ const from=await page.getByRole('button',{name:'Output Mission input',exact:true}).boundingBox(),to=await page.getByRole('button',{name:'Input Specialist team',exact:true}).boundingBox();
+ await page.mouse.move(from.x+from.width/2,from.y+from.height/2);await page.mouse.down();await page.mouse.move(to.x+to.width/2,to.y+to.height/2,{steps:10});await page.mouse.up();
+ await page.getByRole('button',{name:'Output Specialist team',exact:true}).click();await page.getByRole('button',{name:'Input Final delivery',exact:true}).click();
+ assert.equal(await page.locator('.connection').count(),2);
+ await page.locator('#flow-list').click();await page.getByRole('button',{name:/Mission input → Specialist team/}).click();await page.getByRole('button',{name:'Remove connection',exact:true}).click();
+ assert.equal(await page.locator('.connection').count(),1);await page.locator('#close-inspector').click();await page.locator('#undo').click();assert.equal(await page.locator('.connection').count(),2);
+ await page.locator('#save').click();await page.waitForFunction(()=>!document.getElementById('refresh').disabled);
+ assert.deepEqual(state.mission.plan.team_workflow.connections,[{source:'__input',target:'B1'},{source:'B1',target:'__output'}]);
+ await page.reload();await page.waitForFunction(()=>!document.getElementById('refresh').disabled);assert.equal(await page.locator('.connection').count(),2);
+ await page.locator('[data-kind="inspection"]').click();assert.equal(await page.locator('.connection').count(),2);assert.equal(await page.locator('.team-node').count(),2);
+ assert.deepEqual(x.errors,[]);assert.equal(calls.filter(c=>c.p.endsWith('/start')).length,0);await x.context.close();
+});
+
+test('API form saves a write-only key without inference, tests explicitly, and selects the exact model for a council role',async()=>{
+ const x=await setup(),{page,calls,state}=x;
+ await page.locator('#api-models').click();await page.waitForFunction(()=>document.getElementById('api-dialog').open&&!document.getElementById('save-api-model').disabled);
+ assert.equal(calls.filter(c=>c.method!=='GET').length,0);
+ await page.locator('#api-form [name="name"]').fill('My private research model');await page.locator('#api-form [name="base_url"]').fill('https://api.provider.example/v1');await page.locator('#api-form [name="model"]').fill('research/model-one');await page.locator('#api-form [name="api_key"]').fill('test-only-key-never-returned');
+ await page.locator('#save-api-model').click();await page.waitForFunction(()=>!document.getElementById('test-api-model').disabled);
+ assert.equal(state.apiTests,0);assert.equal(await page.locator('#api-form [name="api_key"]').inputValue(),'');assert.doesNotMatch(await page.locator('#api-dialog').innerText(),/test-only-key-never-returned/);
+ assert.match(await page.locator('#api-model-message').innerText(),/No model request/);
+ await page.locator('#test-api-model').click();await page.waitForFunction(()=>!document.getElementById('test-api-model').disabled);assert.equal(state.apiTests,1);
+ assert.match(await page.locator('#api-connections').innerText(),/Tested/);await screenshot(page,'api-model-settings.png');
+ await page.locator('#close-api-models').click();await page.locator('[data-kind="management"]').click();
+ await page.getByRole('group',{name:'Council AI 1',exact:true}).getByRole('button',{name:'Browse AI images and models'}).click();await page.locator('#catalog-filter').selectOption('apis');
+ await page.getByRole('button',{name:'Use this API model',exact:true}).click();await page.waitForFunction(()=>!document.getElementById('agent-dialog').open);
+ assert.match(await page.getByRole('group',{name:'Council AI 1',exact:true}).innerText(),/mdapi_1111111111111111\/research\/model-one/);
+ assert.equal(calls.filter(c=>c.p.endsWith('/manager/messages')||c.p.endsWith('/start')).length,0);assert.deepEqual(x.errors,[]);await x.context.close();
+});
+
+test('manual connection controls include endpoints, reject cycles and keep reduced motion for native flow',async()=>{
+ const x=await setup(),{page}=x;await page.locator('[data-kind="management"]').click();await page.locator('[data-kind="specialist"]').click();await page.locator('[data-kind="inspection"]').click();
+ assert.equal(await page.locator('.connection').count(),0);await page.locator('#flow-list').click();
+ for(const[source,target]of[['__input','B1'],['B1','B2'],['B2','B3'],['B3','__output']]){await page.getByLabel('Connection source',{exact:true}).selectOption(source);await page.getByLabel('Connection target',{exact:true}).selectOption(target);await page.getByRole('button',{name:'Add connection',exact:true}).click();}
+ assert.equal(await page.locator('.connection').count(),4);await page.getByLabel('Connection source',{exact:true}).selectOption('B2');await page.getByLabel('Connection target',{exact:true}).selectOption('B1');await page.getByRole('button',{name:'Add connection',exact:true}).click();assert.equal(await page.locator('.connection').count(),4);
+ await page.locator('#close-flow-list').click();await page.locator('#close-inspector').click();await page.locator('#fit').click();await screenshot(page,'manual-team-workflow.png');assert.deepEqual(x.errors,[]);await x.context.close();
 });
