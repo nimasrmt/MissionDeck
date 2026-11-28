@@ -6,6 +6,7 @@ stay in private, ignored workspace files and never enter a worker's task spec.
 from __future__ import annotations
 
 import ipaddress
+import hashlib
 import json
 import os
 import re
@@ -155,6 +156,8 @@ class APIConnections:
         try: value = path.read_text(encoding="utf-8")
         except OSError: raise APIModelError("api_key", "Re-enter the API key; its local file is missing") from None
         register_secret(value)
+        if row.get("key_sha256") and hashlib.sha256(value.encode()).hexdigest() != row["key_sha256"]:
+            raise APIModelError("api_key", "The local API key changed. Save and test it again")
         return value
 
     def _write_rows(self, rows):
@@ -240,16 +243,13 @@ class APIConnections:
         row = {"id": cid, "name": name.strip(), "protocol": body["protocol"], "base_url": base, "model": model,
                "context_budget": context, "output_budget": output, "verified": False, "checked_at": None, "last_error": None,
                "key_file": old["key_file"] if old and not key else cid + "-" + uuid.uuid4().hex[:16] + ".key"}
+        row["key_sha256"] = hashlib.sha256(key.encode()).hexdigest() if key else old.get("key_sha256")
         if old:
             for k in ("installed_entry", "native_version"): row[k] = old.get(k)
         if key:
             register_secret(key)
             self._atomic(self.private / row["key_file"], key)
         self._write_rows([r for r in rows if r["id"] != cid] + [row])
-        if old and key:
-            # Existing native entry may still reference the old key until the
-            # explicit test reinstalls it. Keep it intact, but mark ineligible.
-            pass
         add_audit(self.conn, "api_model_saved", {"id": cid})
         self.conn.commit()
         return self.public()

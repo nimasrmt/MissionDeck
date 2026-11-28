@@ -463,7 +463,7 @@ class MissionService:
 
     def require_eligible(self, agent: str, model: str | None = None) -> str | None:
         """Check current evidence before any worker dispatch, never a UI cache."""
-        requested = model if model not in (None, "", "unknown") else get_setting(self.conn, "user_api_pin")
+        requested = model if model not in (None, "", "unknown") else get_setting(self.conn, "user_api_pin") if model is None else None
         custom = agent == "opencode" and isinstance(requested, str) and requested.startswith("mdapi_")
         if agent == "opencode" and not custom:
             self.refresh_free_models()

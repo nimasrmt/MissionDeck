@@ -66,7 +66,10 @@ def compile_v3(workflow, mid, objective, eligible):
         for a, b in sorted(edges):
             if b == inspectors[0] and a in by_id and by_id[a].get("kind") != "inspection" and a not in sources:
                 sources.append(a)
-    source["delivery"] = {**(source.get("delivery") or {}), "sources": sources, "inspector": inspectors[0] if inspectors else None}
+    delivery = source.get("delivery")
+    if delivery is not None and not isinstance(delivery, dict):
+        raise PlanValidationError(["Delivery must be an object"])
+    source["delivery"] = {**(delivery or {}), "sources": sources, "inspector": inspectors[0] if inspectors else None}
     source["version"] = 2
     source["wiring"] = "manual"
     plan = compile_v2(source, mid, objective, eligible)

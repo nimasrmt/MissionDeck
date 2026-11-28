@@ -109,9 +109,11 @@ def resolve_under_workspace(
         raise SecurityError("bad_path", "Private API configuration is not a task input, output or artifact")
     candidate = (root / raw).resolve()
     try:
-        candidate.relative_to(root)
+        resolved_parts = [p.casefold() for p in candidate.relative_to(root).parts]
     except ValueError as exc:
         raise SecurityError("bad_path", "Path escapes workspace", {"path": rel_or_path}) from exc
+    if resolved_parts[:2] in ([".orca-runs", "private"], [".opencode", "opencode.json"]):
+        raise SecurityError("bad_path", "Private API configuration cannot be accessed through an alias")
 
     # Walk parents for reparse-point escapes
     cur = candidate

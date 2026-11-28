@@ -80,6 +80,12 @@ class APIModelsTests(unittest.TestCase):
         self.assertEqual(json.loads(self.store.config.read_text()), data)
         with self.assertRaises(APIModelError): self.store.delete(row["id"])
 
+    def test_changed_key_file_requires_a_new_save_and_test(self):
+        row = self.enable(); private = self.store.private / self.store._rows()[0]["key_file"]
+        private.write_text("a-different-key-value")
+        self.assertFalse(self.store.public()["connections"][0]["verified"])
+        with self.assertRaises(APIModelError): self.store.require(row["route"])
+
     def test_failed_test_never_leaves_route_enabled(self):
         row = self.enable()
         with patch("app.api_models.native_version", return_value=1), patch("app.api_models.test_http", side_effect=APIModelError("api_response", "HTTP 401")):
@@ -105,6 +111,11 @@ class APIModelsTests(unittest.TestCase):
         (self.root / ".orca-runs").mkdir(exist_ok=True)
         (self.root / ".orca-runs/private").symlink_to(outside, target_is_directory=True)
         with self.assertRaises(APIModelError): self.add()
+
+    def test_private_credentials_cannot_be_downloaded_through_a_workspace_alias(self):
+        self.add(); private = next(self.store.private.glob("*.key"))
+        alias = self.root / "public.txt"; alias.symlink_to(private)
+        with self.assertRaises(SecurityError): resolve_under_workspace("public.txt", workspace=self.root)
 
     def test_native_catalog_must_report_the_exact_requested_model(self):
         row = self.add(); raw = self.store._rows()[0]
@@ -145,6 +156,9 @@ class APIModelsTests(unittest.TestCase):
             self.assertEqual(service.require_eligible("opencode", row["route"]), row["route"])
             free_probe.assert_not_called()
             with self.assertRaises(Exception): service.require_eligible("opencode", "mdapi_0000000000000000/no-such-model")
+            from app.db import set_setting
+            set_setting(self.conn, "user_api_pin", row["route"]); self.conn.commit()
+            with self.assertRaises(Exception): service.require_eligible("opencode", "unknown")
 
     def test_settings_endpoints_are_csrf_protected_write_only_and_no_inference_on_get(self):
         adapter = MagicMock(); adapter.status.return_value = native_status(); adapter.agent_installed.return_value = {"agents": []}; adapter.account_list.return_value = {}
